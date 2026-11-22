@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getTerrainHeight } from '../map/terrain.js';
+import { createViewModels } from './gunModels.js';
 
 const STAND_EYE_HEIGHT = 1.75;
 const CROUCH_EYE_HEIGHT = 1.05;
@@ -60,32 +61,13 @@ export function createFirstPersonController(camera, domElement, buildings, cover
   let currentEyeHeight = STAND_EYE_HEIGHT;
   let recoilOffset = 0;
   let onLockChangeCallback = null;
+  let speedBoostTimer = 0;
 
   const keys = new Set();
-  const pos = new THREE.Vector3(-12, STAND_EYE_HEIGHT, -10);
+  const pos = new THREE.Vector3(6, STAND_EYE_HEIGHT, 16);
 
-  // 1st-Person Snowball Gun Viewmodel attached to camera
-  const gunGroup = new THREE.Group();
-  const bodyMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(0.11, 0.14, 0.44),
-    new THREE.MeshLambertMaterial({ color: '#38bdf8' })
-  );
-  const barrelMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.045, 0.055, 0.34, 8),
-    new THREE.MeshLambertMaterial({ color: '#e2e8f0' })
-  );
-  barrelMesh.rotation.x = Math.PI / 2;
-  barrelMesh.position.set(0, 0.03, -0.32);
-  const gripMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(0.09, 0.16, 0.1),
-    new THREE.MeshLambertMaterial({ color: '#1e293b' })
-  );
-  gripMesh.position.set(0, -0.11, 0.1);
-  gripMesh.rotation.x = 0.25;
-  gunGroup.add(bodyMesh, barrelMesh, gripMesh);
-  gunGroup.position.set(0.28, -0.24, -0.48);
-  camera.add(gunGroup);
-  gunGroup.visible = false;
+  const viewModels = createViewModels(camera);
+  viewModels.setRecoil(0, false);
 
   function findSafeSpawn() {
     const candidates = [
@@ -120,7 +102,7 @@ export function createFirstPersonController(camera, domElement, buildings, cover
 
   function enter() {
     enabled = true;
-    gunGroup.visible = true;
+    viewModels.setRecoil(0, true);
     findSafeSpawn();
     velY = 0;
     grounded = true;
@@ -134,7 +116,7 @@ export function createFirstPersonController(camera, domElement, buildings, cover
 
   function exit() {
     enabled = false;
-    gunGroup.visible = false;
+    viewModels.setRecoil(0, false);
     activeFallback = false;
     isDragging = false;
     keys.clear();
@@ -225,10 +207,13 @@ export function createFirstPersonController(camera, domElement, buildings, cover
     if (keys.has('KeyD')) move.add(right);
     if (keys.has('KeyA')) move.sub(right);
 
+    if (speedBoostTimer > 0) speedBoostTimer -= dt;
+
     if (move.lengthSq() > 0) {
       move.normalize();
-      const baseSpd = isCrouching ? 4.2 : 7.8;
-      const speed = !isCrouching && (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? 13.5 : baseSpd;
+      const boostMul = speedBoostTimer > 0 ? 1.35 : 1.0;
+      const baseSpd = (isCrouching ? 4.2 : 7.8) * boostMul;
+      const speed = !isCrouching && (keys.has('ShiftLeft') || keys.has('ShiftRight')) ? 13.5 * boostMul : baseSpd;
       const stepX = move.x * speed * dt;
       const stepZ = move.z * speed * dt;
 
@@ -252,8 +237,7 @@ export function createFirstPersonController(camera, domElement, buildings, cover
 
     // Gun recoil recovery
     recoilOffset = Math.max(0, recoilOffset - dt * 0.45);
-    gunGroup.position.z = -0.48 + recoilOffset;
-    gunGroup.rotation.x = recoilOffset * 1.4;
+    viewModels.setRecoil(recoilOffset, enabled);
 
     // Keep within map bounds
     pos.x = Math.max(-280, Math.min(280, pos.x));
@@ -293,6 +277,12 @@ export function createFirstPersonController(camera, domElement, buildings, cover
     getYaw: () => yaw,
     triggerRecoil: () => {
       recoilOffset = 0.09;
+    },
+    setWeaponModel: (key) => {
+      viewModels.setModel(key);
+    },
+    grantSpeedBoost: (secs = 15) => {
+      speedBoostTimer = Math.max(speedBoostTimer, secs);
     },
   };
 }

@@ -2,24 +2,29 @@ import * as THREE from 'three';
 import { getTerrainHeight } from '../map/terrain.js';
 import { createPlayerAvatar } from './playerAvatar.js';
 
-const WEAPONS = {
-  pistol: { name: '눈덩이 권총', speed: 88, gravity: 7.5, damage: 26, cooldown: 0.24, color: '#ffffff', radius: 0.26 },
-  rifle: { name: '눈덩이 소총', speed: 112, gravity: 4.5, damage: 20, cooldown: 0.11, color: '#e0f2fe', radius: 0.22 },
-  grenade: { name: '수류탄', speed: 28, gravity: 18, damage: 85, splash: 13, fuse: 1.4, cooldown: 0.65, color: '#166534', radius: 0.35 },
-  flashbang: { name: '섬광탄', speed: 30, gravity: 18, damage: 10, splash: 16, fuse: 1.1, cooldown: 0.65, color: '#e2e8f0', radius: 0.32 },
+export const WEAPON_CATALOG = {
+  // 4. 맨손
+  hands: { slot: 4, name: '맨손', icon: '🧤', speed: 34, gravity: 15, damage: 30, cooldown: 0.35, ammoCost: 0, radius: 0.3, color: '#ffffff' },
+  // 1. 주총 5종 (각 100발 탄창, 탄약은 눈덩이)
+  rifle: { slot: 1, name: '아이스 AR (라이플)', icon: '🔫', speed: 112, gravity: 4.5, damage: 22, cooldown: 0.11, ammoCost: 1, radius: 0.22, color: '#e0f2fe' },
+  shotgun: { slot: 1, name: '눈대포 (샷건)', icon: '💥', speed: 90, gravity: 7.0, damage: 16, pellets: 6, spread: 0.14, cooldown: 0.68, ammoCost: 3, radius: 0.2, color: '#ffffff' },
+  dmr: { slot: 1, name: '고드름 SKS (DMR)', icon: '🎯', speed: 135, gravity: 2.8, damage: 42, cooldown: 0.28, ammoCost: 1, radius: 0.22, color: '#bae6fd' },
+  sr: { slot: 1, name: '얼음 AWM (SR)', icon: '🔭', speed: 175, gravity: 1.2, damage: 85, cooldown: 1.05, ammoCost: 1, radius: 0.25, color: '#7dd3fc' },
+  concept: { slot: 1, name: '제설 바주카 (컨셉총)', icon: '🚀', speed: 58, gravity: 9.0, damage: 65, splash: 9, cooldown: 0.85, ammoCost: 1, radius: 0.55, color: '#fef08a' },
+  // 2. 보조무기 3종
+  watergun: { slot: 2, name: '네온 물총', icon: '💦', speed: 88, gravity: 6.5, damage: 18, cooldown: 0.16, ammoCost: 1, radius: 0.2, color: '#38bdf8' },
+  revolver: { slot: 2, name: '황금 리볼버', icon: '🤠', speed: 108, gravity: 4.0, damage: 40, cooldown: 0.42, ammoCost: 1, radius: 0.24, color: '#fef9c3' },
+  slingshot: { slot: 2, name: '새총 슈터', icon: '🏹', speed: 72, gravity: 11.0, damage: 34, bounce: true, cooldown: 0.36, ammoCost: 1, radius: 0.28, color: '#f8fafc' },
+  // 3. 눈광탄
+  flashbang: { slot: 3, name: '눈광탄', icon: '⚡', speed: 30, gravity: 18, damage: 12, splash: 16, fuse: 1.1, cooldown: 0.65, ammoCost: 1, radius: 0.32, color: '#e2e8f0' },
 };
 
-const DROP_META = {
-  rifle: { label: '🔥 돌격소총 +30발', color: '#f97316' },
-  grenade: { label: '💣 수류탄 +2', color: '#22c55e' },
-  flashbang: { label: '⚡ 섬광탄 +2', color: '#38bdf8' },
-  medkit: { label: '☕ 핫초코 HP +40', color: '#ef4444' },
-};
+const PRIMARY_KEYS = ['rifle', 'shotgun', 'dmr', 'sr', 'concept'];
+const SIDEARM_KEYS = ['watergun', 'revolver', 'slingshot'];
 
 function createSnowmanNPC(isSanta = false) {
   const group = new THREE.Group();
   const snowMat = new THREE.MeshLambertMaterial({ color: '#f4f8fc' });
-  const darkMat = new THREE.MeshLambertMaterial({ color: '#1f2937' });
   const accentMat = new THREE.MeshLambertMaterial({ color: isSanta ? '#d92d20' : '#2563eb' });
   const carrotMat = new THREE.MeshLambertMaterial({ color: '#f97316' });
 
@@ -45,7 +50,7 @@ function createSnowmanNPC(isSanta = false) {
 }
 
 export function createSurvivalCombatSystem(scene, world, callbacks) {
-  const { onStatsChange, onPlayerHit, onFlashbang, onFeed } = callbacks;
+  const { onStatsChange, onPlayerHit, onFlashbang, onFeed, onWeaponModelChange, onSpeedBoost } = callbacks;
 
   const projectiles = [];
   const effects = [];
@@ -54,12 +59,22 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
   const bots = [];
   const remotePlayers = new Map();
 
-  let activeWeapon = 'pistol';
-  const ammo = {
-    pistol: Infinity,
-    rifle: 0,
-    grenade: 1,
-    flashbang: 1,
+  // Start UNARMED (4번 맨손) with 0 guns! Must scoop snow & defeat snowmen for PUBG loot!
+  let activeSlot = 4;
+  const slots = {
+    1: null, // { key, mag: 100 }
+    2: null, // { key, mag: 100 }
+    3: { key: 'flashbang' },
+    4: { key: 'hands' },
+  };
+
+  const inventory = {
+    snowballs: 0, // Shared snowball ammo pouch (also thrown in hands mode)
+    flashbangs: 0,
+    medkits: 0,
+    drinks: 0,
+    helmet: 0, // 0..3뚝
+    vest: 0,   // 0..3갑
   };
 
   let playerHp = 100;
@@ -99,10 +114,8 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       if (msg.type === 'welcome') {
         myId = msg.id;
         zoneRadius = msg.zoneRadius ?? 220;
-        for (const rp of msg.roster || []) {
-          addRemotePlayer(rp);
-        }
-        onFeed?.(`🌐 ${msg.name}님 접속 완료 (온라인)`);
+        for (const rp of msg.roster || []) addRemotePlayer(rp);
+        onFeed?.(`🌐 ${msg.name}님 접속 완료`);
         notify();
       } else if (msg.type === 'join') {
         addRemotePlayer(msg.player);
@@ -126,17 +139,6 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
             rp.avatar.group.visible = s.alive;
           }
         }
-      } else if (msg.type === 'state') {
-        const rp = remotePlayers.get(msg.id);
-        if (rp) {
-          rp.tx = msg.x;
-          rp.ty = msg.y;
-          rp.tz = msg.z;
-          rp.yaw = msg.yaw;
-          rp.hp = msg.hp;
-          rp.alive = msg.alive;
-          rp.avatar.group.visible = msg.alive;
-        }
       } else if (msg.type === 'throw') {
         spawnProjectile(
           new THREE.Vector3(msg.origin.x, msg.origin.y, msg.origin.z),
@@ -146,21 +148,11 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
           msg.id
         );
       } else if (msg.type === 'damaged') {
-        playerHp = msg.hp;
-        onPlayerHit?.();
-        notify();
+        applyIncomingDamage(msg.damage || 18);
       } else if (msg.type === 'eliminated') {
         onFeed?.(`💀 ${msg.killerName} → ${msg.victimName} 처치!`);
         if (msg.victimId === myId) {
-          playerHp = 0;
-          alive = false;
-          onFeed?.('❄️ 쓰러졌습니다! 3초 후 부활합니다...');
-          setTimeout(() => {
-            playerHp = 100;
-            alive = true;
-            ws?.readyState === 1 && ws.send(JSON.stringify({ type: 'respawn' }));
-            notify();
-          }, 3000);
+          handlePlayerDeath('라이벌에게 쓰러졌습니다!');
         }
         notify();
       } else if (msg.type === 'zone') {
@@ -176,13 +168,7 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
     const avatar = createPlayerAvatar(rp.color, rp.name);
     avatar.group.position.set(rp.x, rp.y - 1.75, rp.z);
     scene.add(avatar.group);
-    remotePlayers.set(rp.id, {
-      ...rp,
-      tx: rp.x,
-      ty: rp.y,
-      tz: rp.z,
-      avatar,
-    });
+    remotePlayers.set(rp.id, { ...rp, tx: rp.x, ty: rp.y, tz: rp.z, avatar });
   }
 
   function removeRemotePlayer(id) {
@@ -193,10 +179,39 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
     }
   }
 
-  // Spawn 12 Snowmen NPCs (drop weapons & grenades!)
+  function getDamageReduction() {
+    const helmRed = [0, 0.15, 0.25, 0.35][inventory.helmet] || 0;
+    const vestRed = [0, 0.15, 0.25, 0.35][inventory.vest] || 0;
+    return Math.min(0.65, helmRed + vestRed);
+  }
+
+  function applyIncomingDamage(rawDmg) {
+    if (!alive) return;
+    const dmg = Math.max(2, rawDmg * (1 - getDamageReduction()));
+    playerHp = Math.max(0, playerHp - dmg);
+    onPlayerHit?.();
+    if (playerHp <= 0) {
+      handlePlayerDeath('체력이 소진되었습니다!');
+    }
+    notify();
+  }
+
+  function handlePlayerDeath(reason) {
+    alive = false;
+    onFeed?.(`💀 ${reason} 3초 후 부활합니다...`);
+    setTimeout(() => {
+      playerHp = 100;
+      alive = true;
+      ws?.readyState === 1 && ws.send(JSON.stringify({ type: 'respawn' }));
+      notify();
+    }, 3000);
+  }
+
+  // Spawn 14 Snowmen NPCs across campus
   const snowmanSpots = [
     [16, -18], [34, -5], [-10, -15], [52, -32], [-28, 12], [18, 35],
     [45, 25], [-40, -45], [65, -45], [0, -65], [-65, 15], [115, -10],
+    [2, 5], [-18, 22],
   ];
   snowmanSpots.forEach(([sx, sz], i) => {
     const mesh = createSnowmanNPC(i % 2 === 0);
@@ -208,7 +223,7 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       z: sz,
       vx: 0,
       vz: 0,
-      hp: 60,
+      hp: 50,
       alive: true,
       respawnTimer: 0,
       stunTimer: 0,
@@ -216,7 +231,7 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
     });
   });
 
-  // Spawn 3 AI Survival Rival Players (so solo play also feels like survival PvP!)
+  // Spawn 3 AI Rival Bots
   const botConfigs = [
     { name: '라이벌-A', color: '#ef4444', x: 55, z: -20 },
     { name: '라이벌-B', color: '#3b82f6', x: -35, z: 25 },
@@ -238,26 +253,43 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       alive: true,
       respawnTimer: 0,
       stunTimer: 0,
-      fireCooldown: 1.5,
+      fireCooldown: 1.8,
       wanderTimer: 0,
       walkPhase: 0,
     });
   });
 
-  function spawnDrop(x, z) {
-    const types = ['rifle', 'grenade', 'flashbang', 'medkit'];
-    const type = types[Math.floor(Math.random() * types.length)];
-    const meta = DROP_META[type];
+  function spawnPubgDrop(x, z) {
+    const roll = Math.random();
+    let drop;
+    if (roll < 0.34) {
+      const key = PRIMARY_KEYS[Math.floor(Math.random() * PRIMARY_KEYS.length)];
+      drop = { category: 'primary', key, label: `${WEAPON_CATALOG[key].icon} ${WEAPON_CATALOG[key].name} (100발)`, color: '#f97316' };
+    } else if (roll < 0.56) {
+      const key = SIDEARM_KEYS[Math.floor(Math.random() * SIDEARM_KEYS.length)];
+      drop = { category: 'sidearm', key, label: `${WEAPON_CATALOG[key].icon} ${WEAPON_CATALOG[key].name} (100발)`, color: '#06b6d4' };
+    } else if (roll < 0.70) {
+      const lv = Math.random() < 0.5 ? 1 : Math.random() < 0.75 ? 2 : 3;
+      drop = { category: 'helmet', level: lv, label: `🪖 ${lv}뚝배기`, color: '#a855f7' };
+    } else if (roll < 0.82) {
+      const lv = Math.random() < 0.5 ? 1 : Math.random() < 0.75 ? 2 : 3;
+      drop = { category: 'vest', level: lv, label: `🦺 ${lv}갑옷`, color: '#8b5cf6' };
+    } else if (roll < 0.90) {
+      drop = { category: 'flashbang', label: '⚡ 눈광탄 +2', color: '#38bdf8' };
+    } else if (roll < 0.95) {
+      drop = { category: 'medkit', label: '💊 구급물약 +1', color: '#ef4444' };
+    } else {
+      drop = { category: 'drink', label: '🥤 에너지 드링크 +1', color: '#22c55e' };
+    }
 
     const box = new THREE.Mesh(
-      new THREE.BoxGeometry(0.85, 0.55, 0.85),
-      new THREE.MeshBasicMaterial({ color: meta.color })
+      new THREE.BoxGeometry(0.95, 0.6, 0.95),
+      new THREE.MeshBasicMaterial({ color: drop.color })
     );
     const y = getTerrainHeight(x, z) + 0.65;
     box.position.set(x, y, z);
     scene.add(box);
-
-    drops.push({ mesh: box, type, x, z, baseY: y, age: 0 });
+    drops.push({ mesh: box, drop, x, z, baseY: y, age: 0 });
   }
 
   function spawnEffect(x, y, z, color, targetScale, duration = 0.35) {
@@ -271,132 +303,193 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
   }
 
   function spawnProjectile(origin, dir, weaponKey, fromPlayer, ownerId = null) {
-    const spec = WEAPONS[weaponKey] || WEAPONS.pistol;
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(spec.radius, 8, 8),
-      new THREE.MeshBasicMaterial({ color: spec.color })
-    );
-    mesh.position.copy(origin).addScaledVector(dir, 0.9);
-    scene.add(mesh);
+    const spec = WEAPON_CATALOG[weaponKey] || WEAPON_CATALOG.hands;
+    const count = spec.pellets || 1;
+    for (let i = 0; i < count; i++) {
+      const d = dir.clone().normalize();
+      if (spec.spread) {
+        d.x += (Math.random() - 0.5) * spec.spread;
+        d.y += (Math.random() - 0.5) * spec.spread * 0.6;
+        d.z += (Math.random() - 0.5) * spec.spread;
+        d.normalize();
+      }
+      const mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(spec.radius, 8, 8),
+        new THREE.MeshBasicMaterial({ color: spec.color })
+      );
+      mesh.position.copy(origin).addScaledVector(d, 0.9);
+      scene.add(mesh);
 
-    const vel = dir.clone().normalize().multiplyScalar(spec.speed);
-    if (weaponKey === 'grenade' || weaponKey === 'flashbang') {
-      vel.y += 6.5;
+      const vel = d.multiplyScalar(spec.speed);
+      if (weaponKey === 'flashbang' || weaponKey === 'hands' || weaponKey === 'slingshot') {
+        vel.y += weaponKey === 'flashbang' ? 6.5 : 2.5;
+      }
+
+      projectiles.push({ mesh, vel, weaponKey, spec, fromPlayer, ownerId, age: 0 });
     }
-
-    projectiles.push({
-      mesh,
-      vel,
-      weaponKey,
-      spec,
-      fromPlayer,
-      ownerId,
-      age: 0,
-    });
   }
 
-  function firePlayerWeapon(origin, dir) {
-    if (!alive) return;
-    const now = performance.now() / 1000;
-    const spec = WEAPONS[activeWeapon];
-    if (now - lastFireTime < spec.cooldown) return;
+  function scoopSnow() {
+    inventory.snowballs += 1;
+    onFeed?.(`❄️ 눈덩이 뭉침! (보유: ${inventory.snowballs}개)`);
+    notify();
+  }
 
-    if (ammo[activeWeapon] <= 0) {
-      onFeed?.(`⚠️ ${spec.name} 탄약이 부족합니다! 눈사람을 잡아 보급받으세요.`);
-      activeWeapon = 'pistol';
-      notify();
+  function reloadActiveGun() {
+    const slotObj = slots[activeSlot];
+    if (!slotObj || (activeSlot !== 1 && activeSlot !== 2)) return;
+    if (inventory.snowballs <= 0) {
+      onFeed?.('⚠️ 눈덩이가 없습니다! 4번 맨손으로 바닥 눈을 뭉치세요.');
       return;
+    }
+    const needed = 100 - slotObj.mag;
+    if (needed <= 0) return;
+    const transfer = Math.min(needed, inventory.snowballs);
+    slotObj.mag += transfer;
+    inventory.snowballs -= transfer;
+    onFeed?.(`🔄 ${WEAPON_CATALOG[slotObj.key].name} 재장전 (+${transfer}발)`);
+    notify();
+  }
+
+  function useItem(itemType) {
+    if (itemType === 'medkit') {
+      if (inventory.medkits <= 0 || playerHp >= 100) return;
+      inventory.medkits--;
+      playerHp = Math.min(100, playerHp + 60);
+      onFeed?.('💊 구급물약 사용! (HP +60)');
+    } else if (itemType === 'drink') {
+      if (inventory.drinks <= 0) return;
+      inventory.drinks--;
+      playerHp = Math.min(100, playerHp + 35);
+      onSpeedBoost?.(15);
+      onFeed?.('🥤 에너지 드링크 사용! (HP +35 & 이속 증가 15초)');
+    }
+    notify();
+  }
+
+  function selectSlot(slotNum) {
+    if (slotNum === 1 && !slots[1]) {
+      onFeed?.('⚠️ 주총이 없습니다! 눈사람을 잡아 파밍하세요.');
+      return;
+    }
+    if (slotNum === 2 && !slots[2]) {
+      onFeed?.('⚠️ 보조무기가 없습니다! 눈사람을 잡아 파밍하세요.');
+      return;
+    }
+    activeSlot = slotNum;
+    const key = slots[slotNum]?.key || 'hands';
+    onWeaponModelChange?.(key);
+    notify();
+  }
+
+  function fireActiveSlot(origin, dir, aimingDownAtSnow = false) {
+    if (!alive) return false;
+    const now = performance.now() / 1000;
+
+    // 4번 맨손: 바닥을 조준하면 눈 뭉치기, 정면 조준 시 모은 눈덩이 던지기!
+    if (activeSlot === 4) {
+      if (aimingDownAtSnow || inventory.snowballs <= 0) {
+        if (now - lastFireTime < 0.28) return false;
+        lastFireTime = now;
+        scoopSnow();
+        return true;
+      }
+      if (now - lastFireTime < WEAPON_CATALOG.hands.cooldown) return false;
+      lastFireTime = now;
+      inventory.snowballs--;
+      spawnProjectile(origin, dir, 'hands', true, myId);
+      notify();
+      return true;
+    }
+
+    // 3번 눈광탄
+    if (activeSlot === 3) {
+      if (inventory.flashbangs <= 0) {
+        onFeed?.('⚠️ 눈광탄이 없습니다! 눈사람을 잡아 획득하세요.');
+        return false;
+      }
+      if (now - lastFireTime < WEAPON_CATALOG.flashbang.cooldown) return false;
+      lastFireTime = now;
+      inventory.flashbangs--;
+      spawnProjectile(origin, dir, 'flashbang', true, myId);
+      notify();
+      return true;
+    }
+
+    // 1번 주총 / 2번 보조무기
+    const slotObj = slots[activeSlot];
+    if (!slotObj) return false;
+    const spec = WEAPON_CATALOG[slotObj.key];
+    if (now - lastFireTime < spec.cooldown) return false;
+
+    if (slotObj.mag < spec.ammoCost) {
+      onFeed?.('⚠️ 탄창 부족! [R]키로 눈덩이를 재장전하거나 4번으로 눈을 뭉치세요.');
+      return false;
     }
 
     lastFireTime = now;
-    if (ammo[activeWeapon] !== Infinity) {
-      ammo[activeWeapon]--;
-      if (ammo[activeWeapon] === 0 && activeWeapon !== 'pistol') {
-        activeWeapon = 'pistol';
-      }
-      notify();
-    }
-
-    spawnProjectile(origin, dir, activeWeapon, true, myId);
+    slotObj.mag -= spec.ammoCost;
+    spawnProjectile(origin, dir, slotObj.key, true, myId);
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify({
         type: 'throw',
-        weapon: activeWeapon,
+        weapon: slotObj.key,
         origin: { x: origin.x, y: origin.y, z: origin.z },
         dir: { x: dir.x, y: dir.y, z: dir.z },
       }));
     }
+    notify();
+    return true;
   }
 
   function explodeOrFlash(p, playerPos) {
     const pos = p.mesh.position;
     const isFlash = p.weaponKey === 'flashbang';
-    spawnEffect(
-      pos.x,
-      pos.y,
-      pos.z,
-      isFlash ? '#ffffff' : '#ff6b00',
-      isFlash ? 9 : 7,
-      isFlash ? 0.3 : 0.45
-    );
+    spawnEffect(pos.x, pos.y, pos.z, isFlash ? '#ffffff' : '#f97316', isFlash ? 9 : 7, isFlash ? 0.3 : 0.42);
 
     if (isFlash && playerPos && pos.distanceTo(playerPos) <= p.spec.splash) {
       onFlashbang?.();
     }
 
-    // Affect snowmen
     for (const s of snowmen) {
       if (!s.alive) continue;
-      const d = Math.hypot(s.x - pos.x, s.z - pos.z);
-      if (d <= p.spec.splash) {
-        if (isFlash) {
-          s.stunTimer = 4.0;
-        } else {
+      if (Math.hypot(s.x - pos.x, s.z - pos.z) <= p.spec.splash) {
+        if (isFlash) s.stunTimer = 4.0;
+        else {
           s.hp -= p.spec.damage;
           if (s.hp <= 0) {
             s.alive = false;
             s.mesh.visible = false;
             s.respawnTimer = 7;
-            spawnDrop(s.x, s.z);
-            if (p.fromPlayer) {
-              kills++;
-              onFeed?.('☃️ 눈사람 처치! 보급 아이템이 드랍되었습니다.');
-            }
+            spawnPubgDrop(s.x, s.z);
+            if (p.fromPlayer) kills++;
           }
         }
       }
     }
 
-    // Affect AI bots
     for (const b of bots) {
       if (!b.alive) continue;
-      const d = Math.hypot(b.x - pos.x, b.z - pos.z);
-      if (d <= p.spec.splash) {
-        if (isFlash) {
-          b.stunTimer = 4.0;
-        } else {
+      if (Math.hypot(b.x - pos.x, b.z - pos.z) <= p.spec.splash) {
+        if (isFlash) b.stunTimer = 4.0;
+        else {
           b.hp -= p.spec.damage;
           b.avatar.updateLabel(b.name, b.hp);
           if (b.hp <= 0) {
             b.alive = false;
             b.avatar.group.visible = false;
             b.respawnTimer = 6;
-            spawnDrop(b.x, b.z);
-            if (p.fromPlayer) {
-              kills++;
-              onFeed?.(`💀 ${b.name} 처치!`);
-            }
+            spawnPubgDrop(b.x, b.z);
+            if (p.fromPlayer) kills++;
           }
         }
       }
     }
 
-    // Affect remote multiplayer players (if fired by local player)
     if (p.fromPlayer && !isFlash && ws && ws.readyState === 1) {
       for (const [id, rp] of remotePlayers.entries()) {
         if (!rp.alive) continue;
-        const d = Math.hypot(rp.tx - pos.x, rp.tz - pos.z);
-        if (d <= p.spec.splash) {
+        if (Math.hypot(rp.tx - pos.x, rp.tz - pos.z) <= p.spec.splash) {
           ws.send(JSON.stringify({ type: 'hit', targetId: id, damage: p.spec.damage }));
         }
       }
@@ -404,22 +497,18 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
     notify();
   }
 
-  function setWeapon(w) {
-    if (!WEAPONS[w]) return;
-    if (ammo[w] <= 0) {
-      onFeed?.(`⚠️ ${WEAPONS[w].name} 없음! 눈사람을 처치해 획득하세요.`);
-      return;
-    }
-    activeWeapon = w;
-    notify();
-  }
-
   function notify() {
     onStatsChange({
       playerHp,
       kills,
-      activeWeapon,
-      ammo: { ...ammo },
+      activeSlot,
+      slots: {
+        1: slots[1] ? { ...slots[1], meta: WEAPON_CATALOG[slots[1].key] } : null,
+        2: slots[2] ? { ...slots[2], meta: WEAPON_CATALOG[slots[2].key] } : null,
+        3: { key: 'flashbang', meta: WEAPON_CATALOG.flashbang, count: inventory.flashbangs },
+        4: { key: 'hands', meta: WEAPON_CATALOG.hands, count: inventory.snowballs },
+      },
+      inventory: { ...inventory },
       survivors: 1 + bots.filter((b) => b.alive).length + Array.from(remotePlayers.values()).filter((r) => r.alive).length,
       zoneRadius: Math.round(zoneRadius),
     });
@@ -429,11 +518,17 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
     playerHp = 100;
     alive = true;
     kills = 0;
-    ammo.rifle = 0;
-    ammo.grenade = 1;
-    ammo.flashbang = 1;
-    activeWeapon = 'pistol';
+    slots[1] = null;
+    slots[2] = null;
+    activeSlot = 4;
+    inventory.snowballs = 0;
+    inventory.flashbangs = 0;
+    inventory.medkits = 0;
+    inventory.drinks = 0;
+    inventory.helmet = 0;
+    inventory.vest = 0;
     zoneRadius = 220;
+    onWeaponModelChange?.('hands');
     if (ws && ws.readyState === 1) {
       ws.send(JSON.stringify({ type: 'respawn' }));
       ws.send(JSON.stringify({ type: 'resetZone' }));
@@ -442,32 +537,18 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
   }
 
   function update(dt, playerPos, playerYaw, isFirstPerson) {
-    // Update Blizzard Zone ring
     if (!ws || ws.readyState !== 1) {
       if (zoneRadius > 28) zoneRadius = Math.max(28, zoneRadius - 1.2 * dt);
     }
     zoneMesh.scale.set(zoneRadius, 1, zoneRadius);
 
-    // Blizzard outside damage
     if (isFirstPerson && alive && playerPos) {
       const distFromCenter = Math.hypot(playerPos.x - 20, playerPos.z + 10);
       if (distFromCenter > zoneRadius) {
-        playerHp = Math.max(0, playerHp - 7 * dt);
-        onPlayerHit?.();
-        if (playerHp <= 0) {
-          alive = false;
-          onFeed?.('🥶 눈보라에 쓰러졌습니다! 3초 후 부활...');
-          setTimeout(() => {
-            playerHp = 100;
-            alive = true;
-            notify();
-          }, 3000);
-        }
-        notify();
+        applyIncomingDamage(7 * dt);
       }
     }
 
-    // Sync local player state over WebSocket
     netSyncTimer += dt;
     if (ws && ws.readyState === 1 && playerPos && netSyncTimer >= 0.06) {
       netSyncTimer = 0;
@@ -482,7 +563,6 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       }));
     }
 
-    // Interpolate remote players (hide if overlapping local camera to prevent near-plane clipping)
     for (const rp of remotePlayers.values()) {
       rp.avatar.group.position.x += (rp.tx - rp.avatar.group.position.x) * 0.25;
       rp.avatar.group.position.y += (rp.ty - 1.75 - rp.avatar.group.position.y) * 0.25;
@@ -494,35 +574,45 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       }
     }
 
-    // Update loot drops & pickup
+    // Loot pickups
     for (let i = drops.length - 1; i >= 0; i--) {
       const d = drops[i];
       d.age += dt;
       d.mesh.rotation.y += 2.2 * dt;
       d.mesh.position.y = d.baseY + Math.sin(d.age * 3.5) * 0.18;
 
-      if (isFirstPerson && alive && playerPos) {
-        const dist = Math.hypot(playerPos.x - d.x, playerPos.z - d.z);
-        if (dist < 2.8) {
-          if (d.type === 'rifle') ammo.rifle += 30;
-          else if (d.type === 'grenade') ammo.grenade += 2;
-          else if (d.type === 'flashbang') ammo.flashbang += 2;
-          else if (d.type === 'medkit') playerHp = Math.min(100, playerHp + 40);
-
-          onFeed?.(`🎁 ${DROP_META[d.type].label} 획득!`);
-          scene.remove(d.mesh);
-          drops.splice(i, 1);
-          notify();
+      if (isFirstPerson && alive && playerPos && Math.hypot(playerPos.x - d.x, playerPos.z - d.z) < 2.8) {
+        const item = d.drop;
+        if (item.category === 'primary') {
+          slots[1] = { key: item.key, mag: 100 };
+          selectSlot(1);
+        } else if (item.category === 'sidearm') {
+          slots[2] = { key: item.key, mag: 100 };
+          selectSlot(2);
+        } else if (item.category === 'helmet') {
+          inventory.helmet = Math.max(inventory.helmet, item.level);
+        } else if (item.category === 'vest') {
+          inventory.vest = Math.max(inventory.vest, item.level);
+        } else if (item.category === 'flashbang') {
+          inventory.flashbangs += 2;
+        } else if (item.category === 'medkit') {
+          inventory.medkits += 1;
+        } else if (item.category === 'drink') {
+          inventory.drinks += 1;
         }
+        onFeed?.(`🎁 ${item.label} 획득!`);
+        scene.remove(d.mesh);
+        drops.splice(i, 1);
+        notify();
       }
     }
 
-    // Update Snowmen NPCs
+    // Snowmen
     for (const s of snowmen) {
       if (!s.alive) {
         s.respawnTimer -= dt;
         if (s.respawnTimer <= 0) {
-          s.hp = 60;
+          s.hp = 50;
           s.alive = true;
           s.mesh.visible = true;
         }
@@ -535,8 +625,8 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       s.wanderTimer -= dt;
       if (s.wanderTimer <= 0) {
         const a = Math.random() * Math.PI * 2;
-        s.vx = Math.cos(a) * 2.5;
-        s.vz = Math.sin(a) * 2.5;
+        s.vx = Math.cos(a) * 2.4;
+        s.vz = Math.sin(a) * 2.4;
         s.wanderTimer = 2 + Math.random() * 2;
       }
       s.x = Math.max(-160, Math.min(160, s.x + s.vx * dt));
@@ -545,7 +635,7 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       s.mesh.rotation.y = Math.atan2(s.vx, s.vz);
     }
 
-    // Update AI Rival Bots
+    // AI Bots
     for (const b of bots) {
       if (!b.alive) {
         b.respawnTimer -= dt;
@@ -564,8 +654,8 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       b.wanderTimer -= dt;
       if (b.wanderTimer <= 0) {
         const a = Math.random() * Math.PI * 2;
-        b.vx = Math.cos(a) * 4.5;
-        b.vz = Math.sin(a) * 4.5;
+        b.vx = Math.cos(a) * 4.2;
+        b.vz = Math.sin(a) * 4.2;
         b.wanderTimer = 1.8 + Math.random() * 2;
       }
       b.x = Math.max(-140, Math.min(140, b.x + b.vx * dt));
@@ -580,16 +670,16 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
         const dx = playerPos.x - b.x;
         const dz = playerPos.z - b.z;
         const dist = Math.hypot(dx, dz);
-        if (dist < 46) {
+        if (dist < 44) {
           b.avatar.group.rotation.y = Math.atan2(dx, dz);
           b.fireCooldown -= dt;
           if (b.fireCooldown <= 0) {
-            b.fireCooldown = 1.2 + Math.random() * 1.2;
+            b.fireCooldown = 1.4 + Math.random() * 1.2;
             const origin = new THREE.Vector3(b.x, by + 1.5, b.z);
             const dir = playerPos.clone().sub(origin).normalize();
-            dir.x += (Math.random() - 0.5) * 0.08;
-            dir.z += (Math.random() - 0.5) * 0.08;
-            spawnProjectile(origin, dir, 'pistol', false, b.id);
+            dir.x += (Math.random() - 0.5) * 0.1;
+            dir.z += (Math.random() - 0.5) * 0.1;
+            spawnProjectile(origin, dir, 'watergun', false, b.id);
           }
         } else {
           b.avatar.group.rotation.y = Math.atan2(b.vx, b.vz);
@@ -599,7 +689,7 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       }
     }
 
-    // Update Projectiles
+    // Projectiles
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
       p.age += dt;
@@ -608,7 +698,6 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
 
       const groundY = getTerrainHeight(p.mesh.position.x, p.mesh.position.z);
 
-      // Fuse weapons (Grenade / Flashbang)
       if (p.spec.fuse) {
         if (p.mesh.position.y <= groundY + 0.3) {
           p.mesh.position.y = groundY + 0.3;
@@ -624,10 +713,13 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
         continue;
       }
 
-      // Direct bullets (Pistol / Rifle)
+      if (p.spec.bounce && p.mesh.position.y <= groundY + 0.3 && p.vel.y < 0) {
+        p.mesh.position.y = groundY + 0.3;
+        p.vel.y = Math.abs(p.vel.y) * 0.65;
+      }
+
       let hit = false;
 
-      // Check cover obstacle collision (bullets stop on barricades, crates, snowmounds, planters)
       for (const c of world.covers || []) {
         if (
           p.mesh.position.x >= c.minX &&
@@ -637,7 +729,7 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
           p.mesh.position.y <= c.topY
         ) {
           hit = true;
-          spawnEffect(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, '#e2e8f0', 0.9, 0.15);
+          spawnEffect(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, '#ffffff', 1.0, 0.16);
           break;
         }
       }
@@ -648,15 +740,19 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
           const sy = getTerrainHeight(s.x, s.z) + 1.4;
           if (Math.hypot(p.mesh.position.x - s.x, p.mesh.position.y - sy, p.mesh.position.z - s.z) < 1.35) {
             hit = true;
-            s.hp -= p.spec.damage;
-            spawnEffect(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, '#ffffff', 1.5, 0.2);
-            if (s.hp <= 0) {
-              s.alive = false;
-              s.mesh.visible = false;
-              s.respawnTimer = 7;
-              spawnDrop(s.x, s.z);
-              kills++;
-              onFeed?.('☃️ 눈사람 처치! 무기/수류탄 드랍!');
+            if (p.spec.splash) {
+              explodeOrFlash(p, playerPos);
+            } else {
+              s.hp -= p.spec.damage;
+              spawnEffect(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, '#ffffff', 1.4, 0.2);
+              if (s.hp <= 0) {
+                s.alive = false;
+                s.mesh.visible = false;
+                s.respawnTimer = 7;
+                spawnPubgDrop(s.x, s.z);
+                kills++;
+                onFeed?.('☃️ 눈사람 처치! 배그 파밍 아이템 드랍!');
+              }
             }
             notify();
             break;
@@ -668,16 +764,20 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
             const by = getTerrainHeight(b.x, b.z) + 1.1;
             if (Math.hypot(p.mesh.position.x - b.x, p.mesh.position.y - by, p.mesh.position.z - b.z) < 1.1) {
               hit = true;
-              b.hp -= p.spec.damage;
-              b.avatar.updateLabel(b.name, b.hp);
-              spawnEffect(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, '#ef4444', 1.4, 0.2);
-              if (b.hp <= 0) {
-                b.alive = false;
-                b.avatar.group.visible = false;
-                b.respawnTimer = 6;
-                spawnDrop(b.x, b.z);
-                kills++;
-                onFeed?.(`💀 ${b.name} 처치!`);
+              if (p.spec.splash) {
+                explodeOrFlash(p, playerPos);
+              } else {
+                b.hp -= p.spec.damage;
+                b.avatar.updateLabel(b.name, b.hp);
+                spawnEffect(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, '#ffffff', 1.4, 0.2);
+                if (b.hp <= 0) {
+                  b.alive = false;
+                  b.avatar.group.visible = false;
+                  b.respawnTimer = 6;
+                  spawnPubgDrop(b.x, b.z);
+                  kills++;
+                  onFeed?.(`💀 ${b.name} 처치!`);
+                }
               }
               notify();
               break;
@@ -690,7 +790,7 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
             if (Math.hypot(p.mesh.position.x - rp.tx, p.mesh.position.y - (rp.ty - 0.5), p.mesh.position.z - rp.tz) < 1.1) {
               hit = true;
               ws.send(JSON.stringify({ type: 'hit', targetId: id, damage: p.spec.damage }));
-              spawnEffect(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, '#ef4444', 1.4, 0.2);
+              spawnEffect(p.mesh.position.x, p.mesh.position.y, p.mesh.position.z, '#ffffff', 1.4, 0.2);
               break;
             }
           }
@@ -698,31 +798,21 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
       } else if (!hit && isFirstPerson && alive && playerPos) {
         if (p.mesh.position.distanceTo(playerPos) < 1.15) {
           hit = true;
-          playerHp = Math.max(0, playerHp - 12);
-          onPlayerHit?.();
-          if (playerHp <= 0) {
-            alive = false;
-            onFeed?.('💀 라이벌에게 쓰러졌습니다! 3초 후 부활...');
-            setTimeout(() => {
-              playerHp = 100;
-              alive = true;
-              notify();
-            }, 3000);
-          }
-          notify();
+          applyIncomingDamage(12);
         }
       }
 
-      if (hit || p.mesh.position.y <= groundY || p.age > 3.5) {
-        if (!hit && p.mesh.position.y <= groundY) {
-          spawnEffect(p.mesh.position.x, groundY + 0.2, p.mesh.position.z, '#ffffff', 1.1, 0.18);
+      if (hit || (!p.spec.bounce && p.mesh.position.y <= groundY) || p.age > 3.5) {
+        if (!hit && p.spec.splash) {
+          explodeOrFlash(p, playerPos);
+        } else if (!hit && p.mesh.position.y <= groundY) {
+          spawnEffect(p.mesh.position.x, groundY + 0.2, p.mesh.position.z, '#ffffff', 1.0, 0.16);
         }
         scene.remove(p.mesh);
         projectiles.splice(i, 1);
       }
     }
 
-    // Update effects
     for (let i = effects.length - 1; i >= 0; i--) {
       const e = effects[i];
       e.age += dt;
@@ -737,11 +827,18 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
     }
   }
 
+  // Initial sync
+  notify();
+
   return {
-    setWeapon,
-    firePlayerWeapon,
+    selectSlot,
+    fireActiveSlot,
+    reloadActiveGun,
+    useItem,
+    scoopSnow,
     update,
     reset,
-    getActiveWeapon: () => activeWeapon,
+    getActiveSlot: () => activeSlot,
+    getActiveWeaponKey: () => slots[activeSlot]?.key || 'hands',
   };
 }
