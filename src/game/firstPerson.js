@@ -239,9 +239,9 @@ export function createFirstPersonController(camera, domElement, buildings, cover
     recoilOffset = Math.max(0, recoilOffset - dt * 0.45);
     viewModels.setRecoil(recoilOffset, enabled);
 
-    // Keep within map bounds
-    pos.x = Math.max(-280, Math.min(280, pos.x));
-    pos.z = Math.max(-280, Math.min(280, pos.z));
+    // Realistic playable Kwangwoon campus bounds (참빛관~한울관, 승리관~화도관 뒤)
+    pos.x = Math.max(-155, Math.min(185, pos.x));
+    pos.z = Math.max(-135, Math.min(135, pos.z));
 
     applyCameraOrientation();
   }

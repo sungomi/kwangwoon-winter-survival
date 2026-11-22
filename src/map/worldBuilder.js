@@ -114,83 +114,121 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     }
   }
 
-  // Athletic pitches & tactical cover
+  // Athletic pitches & varied non-building tactical cover
   const edgeMat = new THREE.LineBasicMaterial({ color: '#111418', linewidth: 1 });
   const covers = [];
   const crateMat = new THREE.MeshLambertMaterial({ color: '#9c6b3f' });
   const sandbagMat = new THREE.MeshLambertMaterial({ color: '#c4b89b' });
   const snowCoverMat = new THREE.MeshLambertMaterial({ color: '#eef4fa' });
-  const concreteMat = new THREE.MeshLambertMaterial({ color: '#7b848f' });
+  const drumRedMat = new THREE.MeshLambertMaterial({ color: '#dc2626' });
+  const drumBlueMat = new THREE.MeshLambertMaterial({ color: '#2563eb' });
+  const benchWoodMat = new THREE.MeshLambertMaterial({ color: '#7c4a27' });
 
   const coverSpecs = [
     // Central Plaza around Christmas Tree & 비마관 / 80주년 기념관
-    { type: 'barricade', x: 8, z: -18, w: 4.2, h: 1.45, d: 1.3, rot: 0.3 },
-    { type: 'crate', x: 36, z: -22, w: 2.2, h: 2.0, d: 2.2, rot: 0.1 },
-    { type: 'barricade', x: 38, z: 4, w: 4.2, h: 1.45, d: 1.3, rot: -0.6 },
-    { type: 'snowmound', x: 14, z: 8, w: 3.8, h: 1.5, d: 2.4, rot: 0.4 },
-    { type: 'crate', x: -6, z: 2, w: 2.4, h: 2.1, d: 2.4, rot: 0.5 },
-    { type: 'planter', x: -24, z: -8, w: 4.5, h: 1.35, d: 1.8, rot: 0.0 },
+    { type: 'barricade', x: 8, z: -18, w: 3.8, h: 1.25, d: 1.1, rot: 0.3 },
+    { type: 'crate_stack', x: 36, z: -22, w: 2.2, h: 1.9, d: 2.2, rot: 0.1 },
+    { type: 'drum', x: 38, z: 4, w: 2.0, h: 1.35, d: 1.2, rot: -0.6 },
+    { type: 'snowmound', x: 14, z: 8, w: 3.4, h: 1.35, d: 2.8, rot: 0.4 },
+    { type: 'crate_stack', x: -6, z: 2, w: 2.2, h: 1.9, d: 2.2, rot: 0.5 },
+    { type: 'bench', x: -22, z: -8, w: 3.4, h: 1.1, d: 1.2, rot: 0.0 },
     // Uphill toward 화도관 & 80주년 기념관
-    { type: 'barricade', x: 15, z: -48, w: 4.4, h: 1.45, d: 1.3, rot: 0.15 },
-    { type: 'crate', x: 38, z: -55, w: 2.4, h: 2.2, d: 2.4, rot: -0.2 },
-    { type: 'snowmound', x: -16, z: -22, w: 3.6, h: 1.5, d: 2.5, rot: -0.3 },
-    { type: 'planter', x: -34, z: -38, w: 4.0, h: 1.4, d: 1.8, rot: 0.2 },
+    { type: 'barricade', x: 15, z: -48, w: 4.0, h: 1.25, d: 1.1, rot: 0.15 },
+    { type: 'drum', x: 38, z: -55, w: 2.0, h: 1.35, d: 1.2, rot: -0.2 },
+    { type: 'snowmound', x: -16, z: -22, w: 3.2, h: 1.35, d: 2.6, rot: -0.3 },
+    { type: 'bench', x: -34, z: -38, w: 3.4, h: 1.1, d: 1.2, rot: 0.2 },
     // Uphill West (한천재 / 연구관 / 동해문화예술관 / 한울관)
-    { type: 'barricade', x: -75, z: -12, w: 4.2, h: 1.45, d: 1.3, rot: 0.8 },
-    { type: 'crate', x: -82, z: -38, w: 2.5, h: 2.2, d: 2.5, rot: 0.25 },
-    { type: 'snowmound', x: -95, z: -55, w: 4.0, h: 1.6, d: 2.6, rot: -0.4 },
-    { type: 'barricade', x: -125, z: -85, w: 4.4, h: 1.45, d: 1.3, rot: 0.5 },
+    { type: 'barricade', x: -75, z: -12, w: 3.8, h: 1.25, d: 1.1, rot: 0.8 },
+    { type: 'crate_stack', x: -82, z: -38, w: 2.2, h: 1.9, d: 2.2, rot: 0.25 },
+    { type: 'snowmound', x: -95, z: -55, w: 3.6, h: 1.4, d: 2.8, rot: -0.4 },
+    { type: 'drum', x: -125, z: -85, w: 2.0, h: 1.35, d: 1.2, rot: 0.5 },
     // South / East Plaza (복지관 / 옥의관 / 새빛관 / 참빛관 / 다산재)
-    { type: 'barricade', x: -12, z: 42, w: 4.2, h: 1.45, d: 1.3, rot: -0.2 },
-    { type: 'crate', x: 24, z: 46, w: 2.4, h: 2.1, d: 2.4, rot: 0.35 },
-    { type: 'planter', x: 52, z: 38, w: 4.4, h: 1.35, d: 1.8, rot: -0.4 },
-    { type: 'barricade', x: 128, z: 18, w: 4.2, h: 1.45, d: 1.3, rot: 0.7 },
-    { type: 'crate', x: 122, z: -15, w: 2.4, h: 2.1, d: 2.4, rot: 0.1 },
-    { type: 'snowmound', x: 138, z: 42, w: 3.8, h: 1.5, d: 2.6, rot: -0.25 },
+    { type: 'barricade', x: -12, z: 42, w: 3.8, h: 1.25, d: 1.1, rot: -0.2 },
+    { type: 'crate_stack', x: 24, z: 46, w: 2.2, h: 1.9, d: 2.2, rot: 0.35 },
+    { type: 'bench', x: 52, z: 38, w: 3.4, h: 1.1, d: 1.2, rot: -0.4 },
+    { type: 'barricade', x: 128, z: 18, w: 3.8, h: 1.25, d: 1.1, rot: 0.7 },
+    { type: 'drum', x: 122, z: -15, w: 2.0, h: 1.35, d: 1.2, rot: 0.1 },
+    { type: 'snowmound', x: 138, z: 42, w: 3.4, h: 1.35, d: 2.8, rot: -0.25 },
   ];
 
   for (const c of coverSpecs) {
-    const baseY = getTerrainHeight(c.x, c.z) - 0.5;
-    const totalH = c.h + 0.5;
-    const mat =
-      c.type === 'crate'
-        ? crateMat
-        : c.type === 'barricade'
-        ? sandbagMat
-        : c.type === 'snowmound'
-        ? snowCoverMat
-        : concreteMat;
+    const baseY = getTerrainHeight(c.x, c.z) - 0.3;
+    const grp = new THREE.Group();
+    grp.position.set(c.x, baseY, c.z);
+    grp.rotation.y = c.rot;
 
-    const geo = new THREE.BoxGeometry(c.w, totalH, c.d);
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(c.x, baseY + totalH / 2, c.z);
-    mesh.rotation.y = c.rot;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(geo), edgeMat));
-
-    // Snow cap on top of barricades, crates & planters
-    if (c.type !== 'snowmound') {
-      const snowTop = new THREE.Mesh(
-        new THREE.BoxGeometry(c.w * 0.96, 0.18, c.d * 0.96),
-        snowCoverMat
-      );
-      snowTop.position.y = totalH / 2 + 0.09;
-      mesh.add(snowTop);
+    if (c.type === 'snowmound') {
+      const moundGeo = new THREE.SphereGeometry(c.w * 0.5, 14, 10);
+      moundGeo.scale(1, 0.55, 0.85);
+      const mound = new THREE.Mesh(moundGeo, snowCoverMat);
+      mound.position.y = c.h * 0.35;
+      mound.castShadow = true;
+      mound.receiveShadow = true;
+      grp.add(mound);
+    } else if (c.type === 'drum') {
+      const dGeo = new THREE.CylinderGeometry(0.45, 0.45, 1.3, 12);
+      const d1 = new THREE.Mesh(dGeo, drumRedMat);
+      d1.position.set(-0.5, 0.75, 0);
+      d1.castShadow = true;
+      const d2 = new THREE.Mesh(dGeo, drumBlueMat);
+      d2.position.set(0.5, 0.75, 0.15);
+      d2.castShadow = true;
+      grp.add(d1, d2);
+    } else if (c.type === 'crate_stack') {
+      const b1 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 1.5), crateMat);
+      b1.position.y = 0.7;
+      b1.castShadow = true;
+      b1.add(new THREE.LineSegments(new THREE.EdgesGeometry(b1.geometry), edgeMat));
+      const b2 = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.9, 1.0), crateMat);
+      b2.position.set(0.15, 1.75, -0.1);
+      b2.rotation.y = 0.35;
+      b2.castShadow = true;
+      b2.add(new THREE.LineSegments(new THREE.EdgesGeometry(b2.geometry), edgeMat));
+      grp.add(b1, b2);
+    } else if (c.type === 'bench') {
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.18, 0.8), benchWoodMat);
+      seat.position.y = 0.65;
+      const back = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.55, 0.15), benchWoodMat);
+      back.position.set(0, 1.0, -0.35);
+      const snow = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.12, 0.72), snowCoverMat);
+      snow.position.y = 0.8;
+      grp.add(seat, back, snow);
+    } else {
+      // Sandbag barricade
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(c.w, c.h, c.d), sandbagMat);
+      wall.position.y = c.h * 0.5 + 0.15;
+      wall.castShadow = true;
+      wall.add(new THREE.LineSegments(new THREE.EdgesGeometry(wall.geometry), edgeMat));
+      const snowTop = new THREE.Mesh(new THREE.BoxGeometry(c.w * 0.96, 0.18, c.d * 0.96), snowCoverMat);
+      snowTop.position.y = c.h + 0.24;
+      grp.add(wall, snowTop);
     }
 
-    worldGroup.add(mesh);
+    worldGroup.add(grp);
 
     const halfSpan = Math.max(c.w, c.d) * 0.5;
     covers.push({
       x: c.x,
       z: c.z,
-      topY: baseY + totalH + 0.18,
+      topY: baseY + c.h + 0.4,
       minX: c.x - halfSpan,
       maxX: c.x + halfSpan,
       minZ: c.z - halfSpan,
       maxZ: c.z + halfSpan,
     });
+  }
+
+  // Warm Christmas Streetlamps around the Main Plaza
+  const lampPostMat = new THREE.MeshLambertMaterial({ color: '#1e293b' });
+  const lampGlowMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
+  const lampCoords = [[2, -26], [36, -26], [4, 24], [38, 22], [-18, 4]];
+  for (const [lx, lz] of lampCoords) {
+    const ly = getTerrainHeight(lx, lz);
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 5.2, 8), lampPostMat);
+    pole.position.set(lx, ly + 2.6, lz);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.38, 8, 8), lampGlowMat);
+    bulb.position.set(lx, ly + 5.3, lz);
+    worldGroup.add(pole, bulb);
   }
   for (const p of mapData.pitches || []) {
     const tex = createPitchTexture(p.type);
@@ -371,7 +409,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       mesh.add(pentMesh);
     }
 
-    // Add Christmas roof light garlands on key campus buildings
+    // Add Christmas roof light garlands & glowing plaza wreaths on key campus buildings
     if (b.isCampus && b.polygon.length >= 3) {
       const garlandColors = ['#ff3b30', '#34c759', '#ffd60a'];
       const bulbGeo = new THREE.SphereGeometry(0.45, 6, 6);
@@ -392,6 +430,22 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
           mesh.add(bulb);
           twinkleLights.push({ mesh: bulb, phase: (i + s) * 0.9 });
         }
+      }
+
+      // Main plaza buildings get a large glowing Christmas wreath + star above!
+      if (['비마관', '화도관', '80주년 기념관', '복지관', '다산재'].includes(b.name)) {
+        const wreath = new THREE.Mesh(
+          new THREE.TorusGeometry(2.6, 0.55, 8, 18),
+          new THREE.MeshLambertMaterial({ color: '#15803d' })
+        );
+        wreath.position.set(bounds.cx, totalHeight + 3.2, bounds.cz);
+        const ribbon = new THREE.Mesh(
+          new THREE.BoxGeometry(1.4, 1.4, 1.4),
+          new THREE.MeshBasicMaterial({ color: '#ef4444' })
+        );
+        ribbon.position.set(bounds.cx, totalHeight + 0.8, bounds.cz);
+        mesh.add(wreath, ribbon);
+        twinkleLights.push({ mesh: ribbon, phase: 0.5 });
       }
     }
 

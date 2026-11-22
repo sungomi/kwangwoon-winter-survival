@@ -404,14 +404,43 @@ body,
   color: #e2e8f0;
 }
 
-/* Bottom-Right: FPS Weapon Loadout */
-.hud-bottom-right {
+/* Bottom-Right: Minimap + FPS Weapon Loadout */
+.hud-bottom-right-wrap {
   position: fixed;
   bottom: 18px;
   right: 16px;
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
   z-index: 25;
+}
+
+.minimap-box {
+  background: rgba(10, 17, 30, 0.86);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 6px;
+  padding: 6px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+}
+
+.minimap-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.2px;
+  color: #38bdf8;
+  margin-bottom: 4px;
+}
+
+#minimap-canvas {
+  display: block;
+  border-radius: 4px;
+}
+
+.hud-bottom-right {
+  display: flex;
+  gap: 6px;
 }
 
 .weapon-slot {

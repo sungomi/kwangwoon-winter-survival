@@ -5,6 +5,7 @@ import { loadKwangwoonMapData } from './map/osmLoader.js';
 import { buildCampusWorld } from './map/worldBuilder.js';
 import { createSurvivalCombatSystem } from './game/survivalCombat.js';
 import { createFirstPersonController } from './game/firstPerson.js';
+import { createMinimap } from './game/minimap.js';
 import kwangwoonGeoJsonRaw from './data/kwangwoon.geojson?raw';
 
 const osmJson = JSON.parse(kwangwoonGeoJsonRaw);
@@ -96,6 +97,7 @@ scene.add(dirLight);
 // Build Kwangwoon World
 const mapData = loadKwangwoonMapData(osmJson);
 const world = buildCampusWorld(scene, mapData, labelsLayer);
+const minimap = createMinimap(document.getElementById('minimap-canvas'), mapData);
 
 // Falling 3D Snow Particles
 const SNOW_COUNT = 1200;
@@ -352,6 +354,11 @@ function animate(now) {
   posAttr.needsUpdate = true;
 
   world.updateLabels(camera, window.innerWidth, window.innerHeight, firstPerson.isEnabled());
+  minimap.render({
+    playerPos: firstPerson.isEnabled() ? firstPerson.getPosition() : null,
+    playerYaw: firstPerson.getYaw(),
+    ...combat.getRadarData(),
+  });
   renderer.render(scene, camera);
 }
 

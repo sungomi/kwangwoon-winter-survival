@@ -840,5 +840,14 @@ export function createSurvivalCombatSystem(scene, world, callbacks) {
     reset,
     getActiveSlot: () => activeSlot,
     getActiveWeaponKey: () => slots[activeSlot]?.key || 'hands',
+    getRadarData: () => ({
+      zoneRadius,
+      snowmen,
+      drops,
+      rivals: [
+        ...bots.map((b) => ({ x: b.x, z: b.z, alive: b.alive })),
+        ...Array.from(remotePlayers.values()).map((r) => ({ x: r.tx, z: r.tz, alive: r.alive })),
+      ],
+    }),
   };
 }

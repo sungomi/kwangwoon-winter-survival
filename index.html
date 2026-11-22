@@ -69,8 +69,13 @@
         </div>
       </div>
 
-      <!-- Bottom-Right: PUBG 4-Slot Weapon Loadout -->
-      <nav class="hud-bottom-right" id="weapon-bar">
+      <!-- Bottom-Right: Minimap + PUBG 4-Slot Weapon Loadout -->
+      <div class="hud-bottom-right-wrap">
+        <div class="minimap-box">
+          <div class="minimap-label">CAMPUS RADAR</div>
+          <canvas id="minimap-canvas" width="150" height="150"></canvas>
+        </div>
+        <nav class="hud-bottom-right" id="weapon-bar">
         <button class="weapon-slot" data-slot="1" type="button">
           <span class="slot-key">1</span>
           <span id="slot1-icon" class="slot-icon">➖</span>
@@ -103,7 +108,8 @@
             <span id="slot4-ammo" class="slot-ammo">0</span>
           </div>
         </button>
-      </nav>
+        </nav>
+      </div>
 
       <!-- Tactical 4-Tick FPS Crosshair -->
       <div id="crosshair" class="crosshair hidden">
