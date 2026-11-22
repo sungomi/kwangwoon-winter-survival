@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KWANGWOON // WINTER SURVIVAL FPS</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas"></canvas>
+      <div id="labels-layer"></div>
+      <div id="hit-vignette" class="hit-vignette"></div>
+      <div id="flash-overlay" class="flash-overlay"></div>
+
+      <!-- Top-Left: Tactical Match Status -->
+      <header class="hud-top-left">
+        <div class="ops-badge">
+          <span class="ops-tag">KW // WINTER OPS</span>
+          <strong class="ops-title">광운대 겨울 서바이벌</strong>
+          <span id="subtitle-text" class="ops-sub">눈사람 처치 → 무기·수류탄·섬광탄 보급</span>
+        </div>
+        <div class="match-stats">
+          <div class="stat-box">
+            <span class="stat-label">SURVIVORS</span>
+            <span id="survivors-text" class="stat-val">5</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">KILLS</span>
+            <span id="kills-text" class="stat-val accent">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">SAFE ZONE</span>
+            <span id="zone-text" class="stat-val cyan">220m</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Top-Right: Tactical Actions & Live Feed -->
+      <div class="hud-top-right">
+        <div class="top-actions">
+          <button id="mode-toggle-btn" class="tac-btn active-fp" type="button">
+            🗺️ 전체 맵
+          </button>
+          <button id="reset-btn" class="tac-btn" type="button">
+            🔄 초기화
+          </button>
+        </div>
+        <div id="kill-feed" class="kill-feed"></div>
+      </div>
+
+      <!-- Bottom-Left: FPS Health Bar -->
+      <div class="hud-bottom-left">
+        <div class="hp-panel">
+          <div class="hp-header">
+            <span class="hp-label">VITAL // HP</span>
+            <span id="hp-text" class="hp-num">100</span>
+          </div>
+          <div class="hp-track">
+            <div id="hp-fill" class="hp-fill" style="width: 100%"></div>
+          </div>
+          <div class="controls-mini">
+            <span><b>WASD</b> 이동</span>
+            <span><b>SHIFT</b> 달리기</span>
+            <span><b>C</b> 앉기</span>
+            <span><b>SPACE</b> 점프</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom-Right: FPS Weapon Loadout -->
+      <nav class="hud-bottom-right" id="weapon-bar">
+        <button class="weapon-slot active" data-weapon="pistol" type="button">
+          <span class="slot-key">1</span>
+          <span class="slot-icon">🔫</span>
+          <div class="slot-info">
+            <span class="slot-name">눈덩이 권총</span>
+            <span class="slot-ammo">∞</span>
+          </div>
+        </button>
+        <button class="weapon-slot" data-weapon="rifle" type="button">
+          <span class="slot-key">2</span>
+          <span class="slot-icon">❄️</span>
+          <div class="slot-info">
+            <span class="slot-name">눈덩이 소총</span>
+            <span id="ammo-rifle" class="slot-ammo">0</span>
+          </div>
+        </button>
+        <button class="weapon-slot" data-weapon="grenade" type="button">
+          <span class="slot-key">3</span>
+          <span class="slot-icon">💣</span>
+          <div class="slot-info">
+            <span class="slot-name">수류탄</span>
+            <span id="ammo-grenade" class="slot-ammo">1</span>
+          </div>
+        </button>
+        <button class="weapon-slot" data-weapon="flashbang" type="button">
+          <span class="slot-key">4</span>
+          <span class="slot-icon">⚡</span>
+          <div class="slot-info">
+            <span class="slot-name">섬광탄</span>
+            <span id="ammo-flashbang" class="slot-ammo">1</span>
+          </div>
+        </button>
+      </nav>
+
+      <!-- Tactical 4-Tick FPS Crosshair -->
+      <div id="crosshair" class="crosshair hidden">
+        <span class="ch-tick ch-top"></span>
+        <span class="ch-tick ch-bottom"></span>
+        <span class="ch-tick ch-left"></span>
+        <span class="ch-tick ch-right"></span>
+        <span class="ch-dot"></span>
+      </div>
+
+      <!-- Deploy / Pause Briefing Overlay -->
+      <div id="fp-hint" class="fp-hint hidden">
+        <div class="fp-briefing-card">
+          <div class="brief-badge">OPERATION // KWANGWOON WINTER</div>
+          <h2>광운대 겨울 서바이벌</h2>
+          <p>눈사람을 처치해 돌격소총·수류탄·섬광탄을 확보하고 최후의 생존자가 되세요.</p>
+          <div class="brief-keys">
+            <div><span>W A S D</span> 이동</div>
+            <div><span>SHIFT</span> 달리기</div>
+            <div><span>C</span> 앉기(엄폐)</div>
+            <div><span>SPACE</span> 점프</div>
+            <div><span>좌클릭</span> 사격/투척</div>
+            <div><span>1 ~ 4</span> 무기 선택</div>
+          </div>
+          <div class="brief-actions">
+            <button id="fp-start-btn" class="tac-btn primary" type="button">▶ 참전하기 (시점 고정)</button>
+            <button id="fp-exit-btn" class="tac-btn" type="button">🗺️ 전체 맵 보기</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Orbit Mode Hint -->
+      <div id="orbit-hint" class="orbit-hint hidden">
+        드래그: 카메라 회전 · 휠: 확대/축소 · 우측 상단 <b>[🎯 1인칭 복귀]</b>로 전투에 재참전
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
