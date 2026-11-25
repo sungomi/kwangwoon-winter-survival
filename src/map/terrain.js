@@ -1,26 +1,42 @@
-function smoothstep(edge0, edge1, x) {
-  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
-}
+import { HEIGHTMAP } from '../data/campusHeightmap.js';
 
 /**
- * Realistic Kwangwoon University stepped campus terraces (자연스러운 캠퍼스 단차 언덕):
- * - Lower Plaza (비마관 · 복지관 · 옥의관 · 다산재 · 참빛관): ~0m flat plaza
- * - Mid Terrace (80주년 기념관 · 화도관): ~4.5m gentle rise
- * - Upper Hill (한천재 · 연구관 · 동해문화예술관 · 한울관 · 빛솔재): ~9.5m–13m
+ * Real Kwangwoon University terrain (광운대 실제 지형).
+ * Samples a smoothed SRTM elevation grid (40m spacing) with Catmull-Rom bicubic
+ * interpolation so slopes stay continuous underfoot (no terraces or creases).
+ * Heights are meters relative to the central plaza.
  */
+const { step, half, n, data } = HEIGHTMAP;
+
+function cell(r, c) {
+  r = r < 0 ? 0 : r > n - 1 ? n - 1 : r;
+  c = c < 0 ? 0 : c > n - 1 ? n - 1 : c;
+  return data[r * n + c];
+}
+
+function catmull(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+}
+
 export function getTerrainHeight(x, z) {
-  // Distance uphill toward North-West (-x, -z)
-  const nw = -x * 0.65 - z * 0.76;
+  const fx = Math.min(n - 1, Math.max(0, (x + half) / step));
+  const fz = Math.min(n - 1, Math.max(0, (z + half) / step));
+  const c = Math.min(n - 2, Math.floor(fx));
+  const r = Math.min(n - 2, Math.floor(fz));
+  const tx = fx - c;
+  const tz = fz - r;
+  const rows = [];
+  for (let k = -1; k <= 2; k++) {
+    rows.push(catmull(cell(r + k, c - 1), cell(r + k, c), cell(r + k, c + 1), cell(r + k, c + 2), tx));
+  }
+  return catmull(rows[0], rows[1], rows[2], rows[3], tz);
+}
 
-  // Terrace 1: Central plaza -> 80주년 기념관 / 화도관 (smoothly rises 0 -> 4.5m)
-  const midTerrace = smoothstep(22, 62, nw) * 4.5;
-
-  // Terrace 2: 80주년 기념관 -> 한천재 / 연구관 / 한울관 (smoothly rises +5.0m)
-  const upperTerrace = smoothstep(78, 135, nw) * 5.0;
-
-  // Subtle hill crest toward 빛솔재 / 연촌재
-  const crest = smoothstep(145, 220, nw) * 3.5;
-
-  return midTerrace + upperTerrace + crest;
+/** Lowest terrain height under a polygon footprint (used to sink building foundations). */
+export function getFootprintMinHeight(polygon) {
+  let min = Infinity;
+  for (const [x, z] of polygon) min = Math.min(min, getTerrainHeight(x, z));
+  return min;
 }

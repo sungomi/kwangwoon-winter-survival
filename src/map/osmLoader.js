@@ -1,4 +1,5 @@
 import { getKwangwoonFallbackMap } from '../data/kwangwoonFallback.js';
+import { CAMPUS_OUTLINES, MAPPED_BARRIERS, WOODS } from '../data/campusBoundary.js';
 
 const METERS_PER_LAT = 111320;
 
@@ -88,6 +89,7 @@ function loadGeoJson(geojson) {
   const grasses = [];
   const trees = [];
 
+  const removed = [];
   let bIdx = 0;
 
   for (const f of features) {
@@ -124,13 +126,23 @@ function loadGeoJson(geojson) {
       for (const ring of rings) {
         if (!ring || ring.length < 3) continue;
         const pts = ring.map(project);
+        const { area, minWidth } = measureFootprint(pts);
+        // OSM artifacts: unnamed slivers / sheds squeezed against real buildings are not on the real map
+        if (!rawName && (area < 90 || minWidth < 5.5)) {
+          removed.push({ id: f.id || props['@id'] || bIdx, area: Math.round(area), minWidth: +minWidth.toFixed(1) });
+          bIdx++;
+          continue;
+        }
+        let height = estimateHeight(props, profile);
+        // Mis-mapped narrow footprints would otherwise render as needle towers
+        if (minWidth < 12) height = Math.min(height, Math.max(7, minWidth * 1.6));
         buildings.push({
           id: `geo_${f.id || bIdx}_${bIdx}`,
           name,
           isCampus,
           facadeType,
           roofStyle: profile?.roofStyle || null,
-          height: estimateHeight(props, profile),
+          height,
           roofColor,
           wallColor,
           polygon: pts,
@@ -184,118 +196,99 @@ function loadGeoJson(geojson) {
     }
   }
 
-  // Fill empty residential blocks across the road from 80주년 기념관 / 복지관 / 연구관
-  populateResidentialNeighborhood(buildings, roads, pitches);
+  if (removed.length) console.info('[map] removed OSM sliver buildings:', removed);
 
-  return buildings.length >= 5 ? { buildings, roads, pitches, grasses, trees } : getKwangwoonFallbackMap();
+  if (buildings.length < 5) return getKwangwoonFallbackMap();
+  return {
+    buildings,
+    roads,
+    pitches,
+    grasses,
+    trees,
+    campusOutlines: CAMPUS_OUTLINES,
+    barriers: buildFences(CAMPUS_OUTLINES, MAPPED_BARRIERS, roads),
+    woods: WOODS,
+  };
 }
 
-function distPointToSegment(px, pz, x1, z1, x2, z2) {
-  const dx = x2 - x1;
-  const dz = z2 - z1;
-  const lenSq = dx * dx + dz * dz;
-  if (lenSq === 0) return Math.hypot(px - x1, pz - z1);
-  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (pz - z1) * dz) / lenSq));
-  return Math.hypot(px - (x1 + t * dx), pz - (z1 + t * dz));
-}
-
-function getBounds(poly) {
-  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-  for (const [x, z] of poly) {
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (z < minZ) minZ = z;
-    if (z > maxZ) maxZ = z;
+function measureFootprint(pts) {
+  let area = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    area += pts[i][0] * pts[i + 1][1] - pts[i + 1][0] * pts[i][1];
   }
-  return { minX, maxX, minZ, maxZ };
+  area = Math.abs(area / 2);
+  let minWidth = Infinity;
+  for (let deg = 0; deg < 180; deg += 3) {
+    const th = (deg * Math.PI) / 180;
+    const cs = Math.cos(th);
+    const sn = Math.sin(th);
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const [x, z] of pts) {
+      const v = x * cs + z * sn;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    minWidth = Math.min(minWidth, hi - lo);
+  }
+  return { area, minWidth };
 }
 
-function populateResidentialNeighborhood(buildings, roads, pitches) {
-  const existingBounds = buildings.map((b) => getBounds(b.polygon));
-  const villaRoofs = ['#4e8c5e', '#a95848', '#8c949c', '#547aa5', '#b8824c'];
-  const villaWalls = ['#e4ddd1', '#d9d0c1', '#c9937e', '#d6d4cf', '#e8e2d5'];
+function segIntersect(a, b, c, d) {
+  const den = (b[0] - a[0]) * (d[1] - c[1]) - (b[1] - a[1]) * (d[0] - c[0]);
+  if (Math.abs(den) < 1e-9) return null;
+  const t = ((c[0] - a[0]) * (d[1] - c[1]) - (c[1] - a[1]) * (d[0] - c[0])) / den;
+  const u = ((c[0] - a[0]) * (b[1] - a[1]) - (c[1] - a[1]) * (b[0] - a[0])) / den;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
+}
 
-  let vIdx = 0;
-  // Cover residential areas west/southwest/northwest of 80주년 기념관 & 복지관
-  for (let gx = -260; gx <= -45; gx += 15) {
-    for (let gz = -180; gz <= 190; gz += 15) {
-      // Skip central campus quad around 비마관/화도관/80주년 기념관
-      if (gx > -65 && gz > -115 && gz < 120) continue;
-
-      const w = 9 + ((vIdx * 3) % 4);
-      const d = 8 + ((vIdx * 5) % 4);
-      const cx = gx + (((vIdx * 7) % 3) - 1);
-      const cz = gz + (((vIdx * 11) % 3) - 1);
-
-      const minX = cx - w / 2;
-      const maxX = cx + w / 2;
-      const minZ = cz - d / 2;
-      const maxZ = cz + d / 2;
-
-      // Check overlap with existing buildings (with 4m buffer)
-      let blocked = false;
-      for (const eb of existingBounds) {
-        if (maxX + 4 > eb.minX && minX - 4 < eb.maxX && maxZ + 4 > eb.minZ && minZ - 4 < eb.maxZ) {
-          blocked = true;
-          break;
-        }
-      }
-      if (blocked) {
-        vIdx++;
-        continue;
-      }
-
-      // Check overlap with roads (with road half-width + 1.5m buffer)
+/**
+ * Campus perimeter fences (교내 담장/펜스) following the real OSM campus outline.
+ * Gates are cut wherever a road or footpath crosses the outline, so every real entrance stays open.
+ */
+function buildFences(outlines, mapped, roads) {
+  const fences = [];
+  const GATE_HALF = 5.5;
+  for (const ring of outlines) {
+    for (let i = 0; i < ring.length - 1; i++) {
+      const a = ring[i];
+      const b = ring[i + 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 0.5) continue;
+      // collect gate cuts along this edge (as [t0, t1] in 0..1)
+      const cuts = [];
       for (const r of roads) {
-        const clearance = (r.width || 6) * 0.5 + Math.max(w, d) * 0.45 + 1.2;
-        for (let i = 0; i < r.points.length - 1; i++) {
-          const [x1, z1] = r.points[i];
-          const [x2, z2] = r.points[i + 1];
-          if (distPointToSegment(cx, cz, x1, z1, x2, z2) < clearance) {
-            blocked = true;
-            break;
-          }
-        }
-        if (blocked) break;
-      }
-      if (blocked) {
-        vIdx++;
-        continue;
-      }
-
-      // Check overlap with pitches
-      for (const p of pitches) {
-        if (Math.abs(cx - p.center[0]) < p.width * 0.6 + 6 && Math.abs(cz - p.center[1]) < p.depth * 0.6 + 6) {
-          blocked = true;
-          break;
+        for (let k = 0; k < r.points.length - 1; k++) {
+          const t = segIntersect(a, b, r.points[k], r.points[k + 1]);
+          if (t === null) continue;
+          const halfT = (Math.max(GATE_HALF, (r.width || 6) * 0.5 + 2) / len);
+          cuts.push([t - halfT, t + halfT]);
         }
       }
-      if (blocked) {
-        vIdx++;
-        continue;
+      cuts.sort((p, q) => p[0] - q[0]);
+      let start = 0;
+      for (const [t0, t1] of cuts) {
+        if (t0 > start) pushPiece(start, Math.min(1, t0));
+        start = Math.max(start, t1);
       }
+      if (start < 1) pushPiece(start, 1);
 
-      const h = 7.5 + ((vIdx * 3) % 7); // 2~4 story Korean villas
-      buildings.push({
-        id: `villa_${vIdx}`,
-        name: null,
-        isCampus: false,
-        facadeType: 'villa',
-        roofStyle: null,
-        height: h,
-        roofColor: villaRoofs[vIdx % villaRoofs.length],
-        wallColor: villaWalls[vIdx % villaWalls.length],
-        polygon: [
-          [minX, minZ],
-          [maxX, minZ],
-          [maxX, maxZ],
-          [minX, maxZ],
-        ],
-      });
-      existingBounds.push({ minX, maxX, minZ, maxZ });
-      vIdx++;
+      function pushPiece(t0, t1) {
+        if ((t1 - t0) * len < 1.2) return;
+        fences.push({
+          type: 'campus',
+          a: [a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0],
+          b: [a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1],
+        });
+      }
     }
   }
+  for (const m of mapped) {
+    for (let i = 0; i < m.points.length - 1; i++) {
+      fences.push({ type: m.type, a: m.points[i], b: m.points[i + 1] });
+    }
+  }
+  return fences;
 }
 
 /**

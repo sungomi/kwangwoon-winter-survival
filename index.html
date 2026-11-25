@@ -10,123 +10,137 @@
       <canvas id="game-canvas"></canvas>
       <div id="labels-layer"></div>
       <div id="hit-vignette" class="hit-vignette"></div>
+      <div id="zone-vignette" class="zone-vignette"></div>
       <div id="flash-overlay" class="flash-overlay"></div>
 
-      <!-- Top-Left: Tactical Match Status -->
-      <header class="hud-top-left">
-        <div class="ops-badge">
-          <span class="ops-tag">KW // WINTER BATTLEGROUNDS</span>
-          <strong class="ops-title">광운대 겨울 서바이벌</strong>
-          <span id="subtitle-text" class="ops-sub">4번 맨손으로 바닥 눈을 뭉쳐 눈사람을 잡으세요!</span>
+      <!-- ===================== In-match HUD ===================== -->
+      <div id="hud" class="hud hidden">
+        <!-- Compass -->
+        <div class="compass">
+          <div id="compass-strip" class="compass-strip"></div>
+          <div class="compass-needle"></div>
+          <div id="compass-deg" class="compass-deg">0</div>
         </div>
-        <div class="match-stats">
-          <div class="stat-box">
-            <span class="stat-label">SURVIVORS</span>
-            <span id="survivors-text" class="stat-val">4</span>
-          </div>
-          <div class="stat-box">
-            <span class="stat-label">KILLS</span>
-            <span id="kills-text" class="stat-val accent">0</span>
-          </div>
-          <div class="stat-box">
-            <span class="stat-label">SAFE ZONE</span>
-            <span id="zone-text" class="stat-val cyan">220m</span>
-          </div>
-        </div>
-      </header>
 
-      <!-- Top-Right: Tactical Actions & Live Feed -->
-      <div class="hud-top-right">
-        <div class="top-actions">
-          <button id="inv-toggle-btn" class="tac-btn" type="button">🎒 가방 (Tab)</button>
-          <button id="mode-toggle-btn" class="tac-btn active-fp" type="button">🗺️ 전체 맵</button>
-          <button id="reset-btn" class="tac-btn" type="button">🔄 초기화</button>
+        <!-- Top-left: zone status -->
+        <div class="zone-panel">
+          <div class="zone-row">
+            <span class="zone-icon" id="zone-icon">⏱</span>
+            <span id="zone-label" class="zone-label">자기장 1단계</span>
+            <span id="zone-timer" class="zone-timer">1:15</span>
+          </div>
+          <div id="zone-dist" class="zone-dist">안전구역 안</div>
         </div>
-        <div id="kill-feed" class="kill-feed"></div>
-      </div>
 
-      <!-- Bottom-Left: FPS Health & Gear -->
-      <div class="hud-bottom-left">
-        <div class="hp-panel">
+        <!-- Top-right: alive / kills + feed -->
+        <div class="hud-top-right">
+          <div class="count-row">
+            <div class="count-box"><span id="alive-text">12</span><small>생존</small></div>
+            <div class="count-box kills"><span id="kills-text">0</span><small>킬</small></div>
+          </div>
+          <div id="kill-feed" class="kill-feed"></div>
+        </div>
+
+        <!-- Banner -->
+        <div id="banner" class="banner hidden"></div>
+
+        <!-- Center prompts -->
+        <div id="prompt" class="prompt hidden"></div>
+        <div id="progress" class="progress hidden">
+          <svg viewBox="0 0 44 44"><circle class="pg-bg" cx="22" cy="22" r="18" /><circle id="progress-ring" class="pg-fg" cx="22" cy="22" r="18" /></svg>
+          <span id="progress-label">재장전</span>
+        </div>
+        <div id="altimeter" class="altimeter hidden">
+          <span class="alt-label">고도</span>
+          <span id="alt-value" class="alt-value">0m</span>
+          <div class="alt-bar"><div id="alt-fill" class="alt-fill"></div></div>
+        </div>
+
+        <!-- Crosshair -->
+        <div id="crosshair" class="crosshair hidden">
+          <span class="ch-tick ch-top"></span>
+          <span class="ch-tick ch-bottom"></span>
+          <span class="ch-tick ch-left"></span>
+          <span class="ch-tick ch-right"></span>
+          <span class="ch-dot"></span>
+        </div>
+        <div id="hitmarker" class="hitmarker"></div>
+        <div id="scope-overlay" class="scope-overlay hidden"></div>
+
+        <!-- Bottom-center: vitals -->
+        <div class="vitals">
           <div class="gear-row">
-            <span id="gear-helmet" class="gear-pill">🪖 0뚝</span>
-            <span id="gear-vest" class="gear-pill">🦺 0갑</span>
-            <span id="pouch-snowballs" class="gear-pill snow">❄️ 눈덩이 0</span>
-          </div>
-          <div class="hp-header">
-            <span class="hp-label">VITAL // HP</span>
-            <span id="hp-text" class="hp-num">100</span>
+            <div id="gear-helmet" class="gear-chip"><span class="gear-ic">🪖</span><b>-</b></div>
+            <div id="gear-vest" class="gear-chip"><span class="gear-ic">🦺</span><b>-</b></div>
+            <div id="gear-ammo" class="gear-chip"><span class="gear-ic">❄️</span><b>0</b></div>
+            <div id="gear-heal" class="gear-chip"><span class="gear-ic">💊</span><b>0</b></div>
+            <div id="gear-drink" class="gear-chip"><span class="gear-ic">🥤</span><b>0</b></div>
+            <div id="gear-flash" class="gear-chip"><span class="gear-ic">⚡</span><b>0</b></div>
           </div>
           <div class="hp-track">
             <div id="hp-fill" class="hp-fill" style="width: 100%"></div>
+            <span id="hp-text" class="hp-num">100</span>
           </div>
           <div class="controls-mini">
-            <span><b>WASD</b> 이동</span>
-            <span><b>C</b> 앉기</span>
-            <span><b>R</b> 재장전</span>
-            <span><b>Tab</b> 가방</span>
+            <span><b>F</b> 줍기</span><span><b>R</b> 장전</span><span><b>C/Z</b> 앉기/엎드리기</span>
+            <span><b>7/8</b> 회복/드링크</span><span><b>M</b> 지도</span><span><b>Tab</b> 가방</span>
           </div>
+        </div>
+
+        <!-- Bottom-right: minimap + weapons -->
+        <div class="hud-bottom-right-wrap">
+          <div class="minimap-box">
+            <canvas id="minimap-canvas" width="200" height="200"></canvas>
+          </div>
+          <nav class="weapon-bar" id="weapon-bar">
+            <button class="weapon-slot" data-slot="1" type="button">
+              <span class="slot-key">1</span>
+              <span id="slot1-icon" class="slot-icon">—</span>
+              <div class="slot-info"><span id="slot1-name" class="slot-name">주무기 없음</span><span id="slot1-ammo" class="slot-ammo">-</span></div>
+            </button>
+            <button class="weapon-slot" data-slot="2" type="button">
+              <span class="slot-key">2</span>
+              <span id="slot2-icon" class="slot-icon">—</span>
+              <div class="slot-info"><span id="slot2-name" class="slot-name">보조무기 없음</span><span id="slot2-ammo" class="slot-ammo">-</span></div>
+            </button>
+            <button class="weapon-slot small" data-slot="3" type="button">
+              <span class="slot-key">3</span><span class="slot-icon">⚡</span>
+              <div class="slot-info"><span class="slot-name">눈광탄</span><span id="slot3-ammo" class="slot-ammo">0</span></div>
+            </button>
+            <button class="weapon-slot small active" data-slot="4" type="button">
+              <span class="slot-key">4</span><span class="slot-icon">🧤</span>
+              <div class="slot-info"><span class="slot-name">맨손</span><span id="slot4-ammo" class="slot-ammo">0</span></div>
+            </button>
+          </nav>
+        </div>
+
+        <div class="top-actions">
+          <button id="inv-toggle-btn" class="tac-btn" type="button">🎒 가방</button>
+          <button id="map-toggle-btn" class="tac-btn" type="button">🗺️ 지도</button>
         </div>
       </div>
 
-      <!-- Bottom-Right: Minimap + PUBG 4-Slot Weapon Loadout -->
-      <div class="hud-bottom-right-wrap">
-        <div class="minimap-box">
-          <div class="minimap-label">CAMPUS RADAR</div>
-          <canvas id="minimap-canvas" width="150" height="150"></canvas>
+      <!-- ===================== Full map (M) ===================== -->
+      <div id="map-modal" class="map-modal hidden">
+        <div class="map-card">
+          <div class="map-head">
+            <span class="ops-tag">MAP // 광운대학교 · 월계동</span>
+            <span class="map-legend">
+              <i class="lg blue"></i>자기장 <i class="lg white"></i>다음 안전구역 <i class="lg red"></i>보급 <i class="lg me"></i>나
+            </span>
+            <button id="map-close-btn" class="tac-btn" type="button">닫기 (M)</button>
+          </div>
+          <canvas id="fullmap-canvas" width="760" height="760"></canvas>
         </div>
-        <nav class="hud-bottom-right" id="weapon-bar">
-        <button class="weapon-slot" data-slot="1" type="button">
-          <span class="slot-key">1</span>
-          <span id="slot1-icon" class="slot-icon">➖</span>
-          <div class="slot-info">
-            <span id="slot1-name" class="slot-name">주총 없음</span>
-            <span id="slot1-ammo" class="slot-ammo">0 / 100</span>
-          </div>
-        </button>
-        <button class="weapon-slot" data-slot="2" type="button">
-          <span class="slot-key">2</span>
-          <span id="slot2-icon" class="slot-icon">➖</span>
-          <div class="slot-info">
-            <span id="slot2-name" class="slot-name">보조무기 없음</span>
-            <span id="slot2-ammo" class="slot-ammo">0 / 100</span>
-          </div>
-        </button>
-        <button class="weapon-slot" data-slot="3" type="button">
-          <span class="slot-key">3</span>
-          <span class="slot-icon">⚡</span>
-          <div class="slot-info">
-            <span class="slot-name">눈광탄</span>
-            <span id="slot3-ammo" class="slot-ammo">0</span>
-          </div>
-        </button>
-        <button class="weapon-slot active" data-slot="4" type="button">
-          <span class="slot-key">4</span>
-          <span class="slot-icon">🧤</span>
-          <div class="slot-info">
-            <span class="slot-name">맨손 (눈뭉치기)</span>
-            <span id="slot4-ammo" class="slot-ammo">0</span>
-          </div>
-        </button>
-        </nav>
       </div>
 
-      <!-- Tactical 4-Tick FPS Crosshair -->
-      <div id="crosshair" class="crosshair hidden">
-        <span class="ch-tick ch-top"></span>
-        <span class="ch-tick ch-bottom"></span>
-        <span class="ch-tick ch-left"></span>
-        <span class="ch-tick ch-right"></span>
-        <span class="ch-dot"></span>
-      </div>
-
-      <!-- PUBG Style Tab Inventory Modal -->
+      <!-- ===================== Inventory (Tab) ===================== -->
       <div id="inventory-modal" class="inv-modal hidden">
         <div class="inv-card">
           <div class="inv-header">
             <div>
               <span class="ops-tag">INVENTORY // TAB</span>
-              <h3>생존 배낭 &amp; 장비</h3>
+              <h3>배낭 &amp; 장비</h3>
             </div>
             <button id="inv-close-btn" class="tac-btn" type="button">닫기 (Tab)</button>
           </div>
@@ -134,50 +148,75 @@
             <div class="inv-col">
               <h4>장착 장비</h4>
               <div id="inv-helmet" class="inv-item">🪖 뚝배기 : 없음</div>
-              <div id="inv-vest" class="inv-item">🦺 갑옷 : 없음</div>
-              <div id="inv-slot1" class="inv-item">1. 주총 : 없음</div>
-              <div id="inv-slot2" class="inv-item">2. 보조무기 : 없음</div>
+              <div id="inv-vest" class="inv-item">🦺 조끼 : 없음</div>
+              <div id="inv-slot1" class="inv-item weapon">1 · 주무기 : 없음</div>
+              <div id="inv-slot2" class="inv-item weapon">2 · 보조무기 : 없음</div>
             </div>
             <div class="inv-col">
-              <h4>탄약 &amp; 소모품 (클릭하여 사용)</h4>
-              <div id="inv-snowballs" class="inv-item">❄️ 공용 눈덩이 탄약 : 0발</div>
-              <div id="inv-flashbangs" class="inv-item">⚡ 눈광탄 : 0개</div>
-              <button id="use-medkit-btn" class="inv-use-btn" type="button">
-                💊 구급물약 사용 (<span id="inv-medkits">0</span>개) · HP +60
-              </button>
-              <button id="use-drink-btn" class="inv-use-btn" type="button">
-                🥤 에너지 드링크 사용 (<span id="inv-drinks">0</span>개) · HP +35 / 이속↑
-              </button>
+              <h4>소모품 (클릭하여 사용)</h4>
+              <div id="inv-snowballs" class="inv-item">❄️ 눈덩이 탄약 : 0</div>
+              <div id="inv-flashbangs" class="inv-item">⚡ 눈광탄 : 0</div>
+              <button id="use-medkit-btn" class="inv-use-btn" type="button">💊 구급상자 (<span id="inv-medkits">0</span>) · HP +75 · 5초</button>
+              <button id="use-drink-btn" class="inv-use-btn" type="button">🥤 에너지 드링크 (<span id="inv-drinks">0</span>) · HP +30 · 이속↑</button>
             </div>
           </div>
+          <div class="inv-tip">무기는 <b>눈사람</b>만 떨굽니다 · 2·4단계 자기장 수축 때 <b>보급 상자</b>에 전설 무기와 3레벨 장비가 들어 있습니다</div>
         </div>
       </div>
 
-      <!-- Deploy / Pause Briefing Overlay -->
-      <div id="fp-hint" class="fp-hint hidden">
-        <div class="fp-briefing-card">
-          <div class="brief-badge">OPERATION // KWANGWOON BATTLEGROUNDS</div>
-          <h2>광운대 겨울 서바이벌</h2>
-          <p>처음엔 <b>4번 맨손</b>으로 시작합니다! 바닥 눈을 클릭해 눈덩이를 뭉친 뒤 눈사람을 잡아 총·뚝배기·갑옷·눈광탄을 파밍하세요.</p>
+      <!-- ===================== Lobby ===================== -->
+      <div id="lobby" class="lobby">
+        <div class="lobby-card">
+          <div class="brief-badge">KW // WINTER BATTLEGROUNDS</div>
+          <h1>광운대 겨울 서바이벌</h1>
+          <p class="lobby-sub">실제 광운대 지형 위로 수송기가 지나갑니다. 원하는 곳에 뛰어내리세요.<br />총은 <b>눈사람</b>을 잡아야만 나옵니다. 최후의 1인이 되면 치킨!</p>
+          <div class="lobby-steps">
+            <div><span>1</span>수송기에서 <b>F</b>로 낙하 · 낙하산은 <b>F</b> 또는 자동</div>
+            <div><span>2</span>맨손으로 바닥 눈을 뭉쳐(바닥 조준 + 클릭) 눈사람을 잡기</div>
+            <div><span>3</span>떨어진 총·뚝배기·조끼를 <b>F</b>로 줍기</div>
+            <div><span>4</span>파란 자기장을 피해 흰 원 안으로 · 최후의 1인</div>
+          </div>
           <div class="brief-keys">
-            <div><span>W A S D</span> 이동</div>
-            <div><span>C / SHIFT</span> 앉기 / 달리기</div>
-            <div><span>좌클릭</span> 눈 뭉치기(바닥) / 사격</div>
-            <div><span>우클릭</span> 정밀 줌 (SR/DMR)</div>
-            <div><span>1 ~ 4</span> 주총/보조/눈광탄/맨손</div>
-            <div><span>R / TAB</span> 재장전 / 가방 열기</div>
+            <div><span>WASD</span> 이동 · <span>SHIFT</span> 달리기</div>
+            <div><span>좌클릭</span> 사격 · <span>우클릭</span> 조준</div>
+            <div><span>1~4 / 휠</span> 무기 교체 · <span>R</span> 장전</div>
+            <div><span>C / Z</span> 앉기 / 엎드리기 · <span>SPACE</span> 점프</div>
+            <div><span>7 / 8</span> 구급상자 / 드링크</div>
+            <div><span>M / TAB</span> 지도 / 가방</div>
           </div>
+          <button id="start-btn" class="tac-btn primary big" type="button">✈️ 매치 시작</button>
+        </div>
+      </div>
+
+      <!-- Paused (pointer unlocked mid-match) -->
+      <div id="pause" class="pause hidden">
+        <div class="pause-card">
+          <h2>일시정지</h2>
+          <p>화면을 클릭하면 계속합니다</p>
+          <button id="resume-btn" class="tac-btn primary" type="button">▶ 계속하기</button>
+        </div>
+      </div>
+
+      <!-- ===================== Results ===================== -->
+      <div id="results" class="results hidden">
+        <div class="results-card">
+          <div id="res-rank" class="res-rank">#1</div>
+          <h2 id="res-title">이겼닭! 오늘 저녁은 치킨이닭!</h2>
+          <div class="res-stats">
+            <div><small>순위</small><b id="res-place">1 / 12</b></div>
+            <div><small>처치</small><b id="res-kills">0</b></div>
+            <div><small>생존 시간</small><b id="res-time">0:00</b></div>
+          </div>
+          <p id="res-killer" class="res-killer"></p>
           <div class="brief-actions">
-            <button id="fp-start-btn" class="tac-btn primary" type="button">▶ 참전하기 (시점 고정)</button>
-            <button id="fp-exit-btn" class="tac-btn" type="button">🗺️ 전체 맵 보기</button>
+            <button id="again-btn" class="tac-btn primary big" type="button">✈️ 다시 하기</button>
+            <button id="spectate-btn" class="tac-btn" type="button">👀 관전</button>
           </div>
         </div>
       </div>
 
-      <!-- Orbit Mode Hint -->
-      <div id="orbit-hint" class="orbit-hint hidden">
-        드래그: 카메라 회전 · 휠: 확대/축소 · 우측 상단 <b>[🎯 1인칭 복귀]</b>로 전투에 재참전
-      </div>
+      <div id="spectate-hint" class="orbit-hint hidden">관전 중 · 드래그로 회전, 휠로 확대 · <b>다시 하기</b>는 우측 상단</div>
+      <button id="again-corner-btn" class="tac-btn primary corner hidden" type="button">✈️ 다시 하기</button>
     </div>
 
     <script type="module" src="/src/main.js"></script>

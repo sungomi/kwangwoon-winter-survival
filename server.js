@@ -55,7 +55,7 @@ setInterval(() => {
   if (players.size > 0) {
     const states = [];
     for (const p of players.values()) {
-      states.push({ id: p.id, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, alive: p.alive });
+      states.push({ id: p.id, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, alive: p.alive, weapon: p.weapon ?? null });
     }
     broadcast({ type: 'snapshot', states, zoneRadius: zoneTick % 8 === 0 ? zoneRadius : undefined });
   }
@@ -128,6 +128,7 @@ wss.on('connection', (ws) => {
       player.yaw = msg.yaw;
       player.hp = msg.hp ?? player.hp;
       player.alive = msg.alive ?? player.alive;
+      if (msg.weapon === null || typeof msg.weapon === 'string') player.weapon = msg.weapon ? msg.weapon.slice(0, 16) : null;
     } else if (msg.type === 'rename' && typeof msg.name === 'string') {
       player.name = msg.name.slice(0, 14) || player.name;
       broadcast({ type: 'rename', id, name: player.name });

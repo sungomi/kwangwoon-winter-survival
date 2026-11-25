@@ -1,6 +1,44 @@
 import * as THREE from 'three';
 import { createBuildingFacadeTexture, createPitchTexture } from './textures.js';
-import { getTerrainHeight } from './terrain.js';
+import { getTerrainHeight, getFootprintMinHeight } from './terrain.js';
+import { createStaticBatcher, mergeByMaterial } from '../utils/mergeByMaterial.js';
+
+function pointInPoly(x, z, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][0], zi = polygon[i][1];
+    const xj = polygon[j][0], zj = polygon[j][1];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi + 1e-9) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function nearAnyBuilding(x, z, buildings, pad = 2.5) {
+  for (const b of buildings) {
+    if (!b.polygon || b.polygon.length < 3) continue;
+    if (
+      pointInPoly(x, z, b.polygon) ||
+      pointInPoly(x + pad, z, b.polygon) ||
+      pointInPoly(x - pad, z, b.polygon) ||
+      pointInPoly(x, z + pad, b.polygon) ||
+      pointInPoly(x, z - pad, b.polygon)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Deterministic pseudo-random so the forest/props layout is the same every load. */
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 function createShapeFromPolygon(polygon) {
   const shape = new THREE.Shape();
@@ -37,6 +75,9 @@ function computePolygonBounds(polygon) {
 export function buildCampusWorld(scene, mapData, labelsLayer) {
   const worldGroup = new THREE.Group();
   scene.add(worldGroup);
+  // Everything static is queued here and merged into one mesh per material at the end
+  const batch = createStaticBatcher();
+  const ORIGIN = new THREE.Vector3();
 
   // Snowy winter hilly terrain plane
   const groundGeo = new THREE.PlaneGeometry(1600, 1600, 110, 110);
@@ -108,9 +149,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
       geo.setIndex(indices);
       geo.computeVertexNormals();
-      const seg = new THREE.Mesh(geo, roadMat);
-      seg.receiveShadow = true;
-      worldGroup.add(seg);
+      batch.add(geo, roadMat, ORIGIN);
     }
   }
 
@@ -152,6 +191,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   ];
 
   for (const c of coverSpecs) {
+    // Cover is never fused into a building: skip any spot that overlaps a real footprint
+    if (nearAnyBuilding(c.x, c.z, mapData.buildings, Math.max(c.w, c.d) * 0.5 + 1.5)) continue;
     const baseY = getTerrainHeight(c.x, c.z) - 0.3;
     const grp = new THREE.Group();
     grp.position.set(c.x, baseY, c.z);
@@ -204,7 +245,10 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       grp.add(wall, snowTop);
     }
 
-    worldGroup.add(grp);
+    grp.updateMatrixWorld(true);
+    grp.traverse((o) => {
+      if (o.isMesh) batch.addMesh(o);
+    });
 
     const halfSpan = Math.max(c.w, c.d) * 0.5;
     covers.push({
@@ -223,12 +267,14 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   const lampGlowMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
   const lampCoords = [[2, -26], [36, -26], [4, 24], [38, 22], [-18, 4]];
   for (const [lx, lz] of lampCoords) {
+    if (nearAnyBuilding(lx, lz, mapData.buildings, 0.8)) continue;
     const ly = getTerrainHeight(lx, lz);
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.18, 5.2, 8), lampPostMat);
     pole.position.set(lx, ly + 2.6, lz);
     const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.38, 8, 8), lampGlowMat);
     bulb.position.set(lx, ly + 5.3, lz);
-    worldGroup.add(pole, bulb);
+    batch.addMesh(pole);
+    batch.addMesh(bulb);
   }
   for (const p of mapData.pitches || []) {
     const tex = createPitchTexture(p.type);
@@ -264,8 +310,116 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     worldGroup.add(treeGroup);
   }
 
+  // Real 영축산 forest on the northern hill + small mapped woods: snowy pines scattered inside the OSM polygons
+  {
+    const rand = mulberry32(1971);
+    const pinePositions = [];
+    for (const poly of mapData.woods || []) {
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const [x, z] of poly) {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+      }
+      // Only populate what is within view distance of the battleground
+      minX = Math.max(minX, -520); maxX = Math.min(maxX, 520);
+      minZ = Math.max(minZ, -520); maxZ = Math.min(maxZ, 520);
+      if (minX >= maxX || minZ >= maxZ) continue;
+      const area = (maxX - minX) * (maxZ - minZ);
+      const tries = Math.min(900, Math.floor(area / 90));
+      for (let i = 0; i < tries; i++) {
+        const x = minX + rand() * (maxX - minX);
+        const z = minZ + rand() * (maxZ - minZ);
+        if (!pointInPoly(x, z, poly)) continue;
+        if (nearAnyBuilding(x, z, mapData.buildings, 3)) continue;
+        pinePositions.push([x, z, 0.75 + rand() * 0.7, rand() * Math.PI * 2]);
+      }
+    }
+    if (pinePositions.length) {
+      const count = pinePositions.length;
+      const trunkI = new THREE.InstancedMesh(trunkGeo, trunkMat, count);
+      const crownI = new THREE.InstancedMesh(coneGeo, pineMat, count);
+      const capI = new THREE.InstancedMesh(capGeo, snowCapMat, count);
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const s = new THREE.Vector3();
+      const p = new THREE.Vector3();
+      pinePositions.forEach(([x, z, sc, rot], i) => {
+        const y = getTerrainHeight(x, z);
+        q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+        s.set(sc, sc, sc);
+        m.compose(p.set(x, y + 1.4 * sc, z), q, s);
+        trunkI.setMatrixAt(i, m);
+        m.compose(p.set(x, y + 4.2 * sc, z), q, s);
+        crownI.setMatrixAt(i, m);
+        m.compose(p.set(x, y + 5.6 * sc, z), q, s);
+        capI.setMatrixAt(i, m);
+      });
+      crownI.castShadow = true;
+      worldGroup.add(trunkI, crownI, capI);
+    }
+  }
+
+  // Campus perimeter fences (실제 캠퍼스 외곽선 기준 담장 + 철제 펜스, 출입구는 개방)
+  const fences = mapData.barriers || [];
+  {
+    const plinthMat = new THREE.MeshLambertMaterial({ color: '#8b8f96' });
+    const railMat = new THREE.MeshLambertMaterial({ color: '#1f2933' });
+    const fenceSnowMat = new THREE.MeshLambertMaterial({ color: '#f1f6fb' });
+    const wallMat = new THREE.MeshLambertMaterial({ color: '#a7a29a' });
+    const postGeo = new THREE.BoxGeometry(0.09, 1.0, 0.09);
+    const postSpots = [];
+    const up = new THREE.Vector3(0, 1, 0);
+
+    for (const f of fences) {
+      const [ax, az] = f.a;
+      const [bx, bz] = f.b;
+      const len = Math.hypot(bx - ax, bz - az);
+      if (len < 0.5) continue;
+      const ang = Math.atan2(bz - az, bx - ax);
+      const isWall = f.type === 'wall';
+      const plinthH = isWall ? 2.2 : 0.6;
+      // Plinth/wall follows the slope in ~4m pieces
+      const pieces = Math.max(1, Math.ceil(len / 4));
+      for (let k = 0; k < pieces; k++) {
+        const t0 = k / pieces;
+        const t1 = (k + 1) / pieces;
+        const mx = ax + (bx - ax) * (t0 + t1) * 0.5;
+        const mz = az + (bz - az) * (t0 + t1) * 0.5;
+        const gy = getTerrainHeight(mx, mz);
+        const pieceLen = len / pieces + 0.05;
+        const v = new THREE.Vector3();
+        batch.add(new THREE.BoxGeometry(pieceLen, plinthH + 0.6, 0.32), isWall ? wallMat : plinthMat, v.set(mx, gy + (plinthH - 0.6) * 0.5, mz), -ang);
+        batch.add(new THREE.BoxGeometry(pieceLen, 0.08, 0.36), fenceSnowMat, v.set(mx, gy + plinthH + 0.04, mz), -ang);
+        if (!isWall) batch.add(new THREE.BoxGeometry(pieceLen, 0.06, 0.06), railMat, v.set(mx, gy + 1.55, mz), -ang);
+      }
+      if (!isWall) {
+        const posts = Math.max(1, Math.floor(len / 0.45));
+        for (let k = 0; k <= posts; k++) {
+          const t = k / posts;
+          postSpots.push([ax + (bx - ax) * t, az + (bz - az) * t, ang]);
+        }
+      }
+    }
+    if (postSpots.length) {
+      const postsI = new THREE.InstancedMesh(postGeo, railMat, postSpots.length);
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const one = new THREE.Vector3(1, 1, 1);
+      const p = new THREE.Vector3();
+      postSpots.forEach(([x, z, ang], i) => {
+        q.setFromAxisAngle(up, -ang);
+        m.compose(p.set(x, getTerrainHeight(x, z) + 1.1, z), q, one);
+        postsI.setMatrixAt(i, m);
+      });
+      worldGroup.add(postsI);
+    }
+  }
+
   // Giant Christmas Tree in Kwangwoon Central Plaza
   const twinkleLights = [];
+  const garlandBase = ['#ff3b30', '#34c759', '#ffd60a'].map((c) => new THREE.Color(c));
+  const garlandMats = garlandBase.map((c) => new THREE.MeshBasicMaterial({ color: c.clone() }));
+  const garlandBulbGeo = new THREE.SphereGeometry(0.45, 6, 5);
   const xmasTree = new THREE.Group();
   xmasTree.position.set(24, getTerrainHeight(24, -10), -10);
 
@@ -331,8 +485,10 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   for (const b of mapData.buildings) {
     if (!b.polygon || b.polygon.length < 3) continue;
     const bounds = computePolygonBounds(b.polygon);
-    const baseY = getTerrainHeight(bounds.cx, bounds.cz) - 2.5;
-    const totalHeight = b.height + 2.5;
+    // Foundation follows the real slope: sink to the lowest corner, roof stays `height` above the centroid
+    const groundAtCenter = getTerrainHeight(bounds.cx, bounds.cz);
+    const baseY = getFootprintMinHeight(b.polygon) - 1.2;
+    const totalHeight = groundAtCenter - baseY + b.height;
 
     const shape = createShapeFromPolygon(b.polygon);
     const geo = new THREE.ExtrudeGeometry(shape, {
@@ -411,8 +567,6 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
 
     // Add Christmas roof light garlands & glowing plaza wreaths on key campus buildings
     if (b.isCampus && b.polygon.length >= 3) {
-      const garlandColors = ['#ff3b30', '#34c759', '#ffd60a'];
-      const bulbGeo = new THREE.SphereGeometry(0.45, 6, 6);
       for (let i = 0; i < b.polygon.length - 1; i++) {
         const [x1, z1] = b.polygon[i];
         const [x2, z2] = b.polygon[i + 1];
@@ -422,13 +576,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
           const t = s / steps;
           const bx = x1 + (x2 - x1) * t;
           const bz = z1 + (z2 - z1) * t;
-          const bulb = new THREE.Mesh(
-            bulbGeo,
-            new THREE.MeshBasicMaterial({ color: garlandColors[(i + s) % garlandColors.length] })
-          );
-          bulb.position.set(bx, totalHeight + 0.45, bz);
-          mesh.add(bulb);
-          twinkleLights.push({ mesh: bulb, phase: (i + s) * 0.9 });
+          // batched into 3 meshes (one per colour); twinkle is done on the shared materials
+          batch.add(garlandBulbGeo, garlandMats[(i + s) % garlandMats.length], new THREE.Vector3(bx, baseY + totalHeight + 0.45, bz));
         }
       }
 
@@ -463,7 +612,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       id: b.id,
       name: b.name,
       isCampus: b.isCampus,
-      height: b.height,
+      height: totalHeight,
       baseY,
       polygon: b.polygon,
       bounds,
@@ -515,12 +664,18 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     }
   }
 
+  batch.flush(worldGroup);
+
   function animateFestive(time) {
     starMesh.rotation.y = time * 1.1;
     for (const item of twinkleLights) {
       const s = 0.75 + 0.45 * Math.sin(time * 3.5 + item.phase);
       item.mesh.scale.setScalar(s);
     }
+    garlandMats.forEach((m, i) => {
+      const k = 0.55 + 0.45 * Math.max(0, Math.sin(time * 3.2 + i * 2.1));
+      m.color.copy(garlandBase[i]).multiplyScalar(k);
+    });
   }
 
   return {
@@ -528,6 +683,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     ground,
     buildings,
     covers,
+    fences,
     updateLabels,
     resetAll,
     animateFestive,
