@@ -1,7 +1,22 @@
 import * as THREE from 'three';
 import { createBuildingFacadeTexture, createPitchTexture } from './textures.js';
 import { getTerrainHeight, getFootprintMinHeight } from './terrain.js';
-import { createStaticBatcher, mergeByMaterial } from '../utils/mergeByMaterial.js';
+import { createStaticBatcher } from '../utils/mergeByMaterial.js';
+import { buildCampusFeatures } from './campusFeatures3d.js';
+import { PLAZA } from '../data/campusFeatures.js';
+import { STAIR_FLIGHTS } from './terrain.js';
+
+function onBuiltLandscape(x, z, pad = 0) {
+  if (Math.hypot(x - PLAZA.x, z - PLAZA.z) < PLAZA.radius + PLAZA.blend + pad) return true;
+  for (const f of STAIR_FLIGHTS) {
+    const rx = x - f.ax;
+    const rz = z - f.az;
+    const along = rx * f.ux + rz * f.uz;
+    const across = -rx * f.uz + rz * f.ux;
+    if (along > -pad && along < f.len + pad && Math.abs(across) < f.width / 2 + pad) return true;
+  }
+  return false;
+}
 
 function pointInPoly(x, z, polygon) {
   let inside = false;
@@ -80,7 +95,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   const ORIGIN = new THREE.Vector3();
 
   // Snowy winter hilly terrain plane
-  const groundGeo = new THREE.PlaneGeometry(1600, 1600, 110, 110);
+  const groundGeo = new THREE.PlaneGeometry(1600, 1600, 400, 400);
   groundGeo.rotateX(-Math.PI / 2);
   const gPos = groundGeo.attributes.position;
   for (let i = 0; i < gPos.count; i++) {
@@ -193,6 +208,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   for (const c of coverSpecs) {
     // Cover is never fused into a building: skip any spot that overlaps a real footprint
     if (nearAnyBuilding(c.x, c.z, mapData.buildings, Math.max(c.w, c.d) * 0.5 + 1.5)) continue;
+    if (onBuiltLandscape(c.x, c.z, Math.max(c.w, c.d) * 0.5 + 1)) continue;
     const baseY = getTerrainHeight(c.x, c.z) - 0.3;
     const grp = new THREE.Group();
     grp.position.set(c.x, baseY, c.z);
@@ -265,7 +281,15 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   // Warm Christmas Streetlamps around the Main Plaza
   const lampPostMat = new THREE.MeshLambertMaterial({ color: '#1e293b' });
   const lampGlowMat = new THREE.MeshBasicMaterial({ color: '#fde047' });
-  const lampCoords = [[2, -26], [36, -26], [4, 24], [38, 22], [-18, 4]];
+  // lamps ring the round plaza rim (skipping where staircases arrive)
+  const lampCoords = [];
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2 + 0.2;
+    const lx = PLAZA.x + Math.cos(a) * (PLAZA.radius - 1.2);
+    const lz = PLAZA.z + Math.sin(a) * (PLAZA.radius - 1.2);
+    const nearStair = STAIR_FLIGHTS.some((f) => Math.hypot(f.bx - lx, f.bz - lz) < f.width / 2 + 2.5);
+    if (!nearStair) lampCoords.push([lx, lz]);
+  }
   for (const [lx, lz] of lampCoords) {
     if (nearAnyBuilding(lx, lz, mapData.buildings, 0.8)) continue;
     const ly = getTerrainHeight(lx, lz);
@@ -421,7 +445,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   const garlandMats = garlandBase.map((c) => new THREE.MeshBasicMaterial({ color: c.clone() }));
   const garlandBulbGeo = new THREE.SphereGeometry(0.45, 6, 5);
   const xmasTree = new THREE.Group();
-  xmasTree.position.set(24, getTerrainHeight(24, -10), -10);
+  // sits in the middle of the sunken round plaza
+  xmasTree.position.set(PLAZA.x, getTerrainHeight(PLAZA.x, PLAZA.z), PLAZA.z);
 
   const treeTrunk = new THREE.Mesh(
     new THREE.CylinderGeometry(1.4, 1.8, 4, 8),
@@ -664,6 +689,9 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     }
   }
 
+  const landscape = buildCampusFeatures(worldGroup, batch, buildings, mapData.campusOutlines);
+  covers.push(...landscape.extraCovers);
+
   batch.flush(worldGroup);
 
   function animateFestive(time) {
@@ -683,7 +711,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     ground,
     buildings,
     covers,
-    fences,
+    fences: fences.concat(landscape.extraWalls),
     updateLabels,
     resetAll,
     animateFestive,

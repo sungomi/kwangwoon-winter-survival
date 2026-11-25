@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getTerrainHeight } from '../map/terrain.js';
+import { getTerrainHeight, MAX_STEP_UP } from '../map/terrain.js';
 import { createViewModels } from './gunModels.js';
 import { buildParachuteModel } from './itemModels.js';
 
@@ -284,8 +284,11 @@ export function createFirstPersonController(camera, domElement, collision, scene
       moveSpeedNow = speed;
       const stepX = move.x * speed * dt;
       const stepZ = move.z * speed * dt;
-      if (!collision.isBlocked(pos.x + stepX, pos.z)) pos.x += stepX;
-      if (!collision.isBlocked(pos.x, pos.z + stepZ)) pos.z += stepZ;
+      // feet height decides whether a ledge can be stepped onto (jumping lets you climb low walls)
+      const feet = pos.y - currentEyeHeight;
+      const canStep = (nx, nz) => getTerrainHeight(nx, nz) - feet <= MAX_STEP_UP;
+      if (!collision.isBlocked(pos.x + stepX, pos.z) && canStep(pos.x + stepX, pos.z)) pos.x += stepX;
+      if (!collision.isBlocked(pos.x, pos.z + stepZ) && canStep(pos.x, pos.z + stepZ)) pos.z += stepZ;
     }
 
     const floorY = getTerrainHeight(pos.x, pos.z) + currentEyeHeight;

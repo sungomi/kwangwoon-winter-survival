@@ -1,4 +1,5 @@
 import { getKwangwoonFallbackMap } from '../data/kwangwoonFallback.js';
+import { placeGates } from './gates.js';
 import { CAMPUS_OUTLINES, MAPPED_BARRIERS, WOODS } from '../data/campusBoundary.js';
 
 const METERS_PER_LAT = 111320;
@@ -249,7 +250,8 @@ function segIntersect(a, b, c, d) {
 function buildFences(outlines, mapped, roads) {
   const fences = [];
   const GATE_HALF = 5.5;
-  for (const ring of outlines) {
+  const gates = placeGates(outlines);
+  outlines.forEach((ring, ringIdx) => {
     for (let i = 0; i < ring.length - 1; i++) {
       const a = ring[i];
       const b = ring[i + 1];
@@ -264,6 +266,12 @@ function buildFences(outlines, mapped, roads) {
           const halfT = (Math.max(GATE_HALF, (r.width || 6) * 0.5 + 2) / len);
           cuts.push([t - halfT, t + halfT]);
         }
+      }
+      // real gates (정문/후문) open the fence for their full width
+      for (const g of gates) {
+        if (g.ring !== ringIdx || g.edge !== i) continue;
+        const halfT = (g.width / 2 + 1.8) / len;
+        cuts.push([g.t - halfT, g.t + halfT]);
       }
       cuts.sort((p, q) => p[0] - q[0]);
       let start = 0;
@@ -282,7 +290,7 @@ function buildFences(outlines, mapped, roads) {
         });
       }
     }
-  }
+  });
   for (const m of mapped) {
     for (let i = 0; i < m.points.length - 1; i++) {
       fences.push({ type: m.type, a: m.points[i], b: m.points[i + 1] });

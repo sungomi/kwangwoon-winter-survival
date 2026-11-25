@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { getTerrainHeight } from '../map/terrain.js';
+import { getTerrainHeight, MAX_STEP_UP } from '../map/terrain.js';
 import { createPlayerAvatar } from './playerAvatar.js';
 import { buildLootVisual, buildAirdropModel, buildPlaneModel } from './itemModels.js';
 import { mergeByMaterial } from '../utils/mergeByMaterial.js';
@@ -172,11 +172,13 @@ export function createSurvivalCombatSystem(scene, world, collision, playArea, ca
   };
   const blueMat = new THREE.MeshBasicMaterial({ color: '#2563eb', transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false });
   const blueWall = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 240, 96, 1, true), blueMat);
+  blueWall.visible = false;
   scene.add(blueWall);
   const whiteRing = new THREE.Mesh(
     new THREE.CylinderGeometry(1, 1, 3, 96, 1, true),
     new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false })
   );
+  whiteRing.visible = false;
   scene.add(whiteRing);
 
   function pickNextCircle(cur, ratio) {
@@ -711,7 +713,8 @@ export function createSurvivalCombatSystem(scene, world, collision, playArea, ca
       const mz = ux * s + uz * c;
       const nx = agent.x + mx * step;
       const nz = agent.z + mz * step;
-      if (!collision.isBlocked(nx, nz, radius)) {
+      const climb = getTerrainHeight(nx, nz) - getTerrainHeight(agent.x, agent.z);
+      if (climb <= MAX_STEP_UP && !collision.isBlocked(nx, nz, radius)) {
         agent.x = Math.max(playArea.minX, Math.min(playArea.maxX, nx));
         agent.z = Math.max(playArea.minZ, Math.min(playArea.maxZ, nz));
         agent.vx = mx;
@@ -1444,9 +1447,10 @@ export function createSurvivalCombatSystem(scene, world, collision, playArea, ca
     }
 
     updateZone(dt);
+    blueWall.visible = zone.phaseIdx >= 0;
     blueWall.position.set(zone.cur.x, 60, zone.cur.z);
     blueWall.scale.set(zone.cur.r, 1, zone.cur.r);
-    whiteRing.visible = zone.state === 'wait';
+    whiteRing.visible = zone.phaseIdx >= 0 && zone.state === 'wait';
     whiteRing.position.set(zone.next.x, getTerrainHeight(zone.next.x, zone.next.z) + 1.5, zone.next.z);
     whiteRing.scale.set(zone.next.r, 1, zone.next.r);
 
