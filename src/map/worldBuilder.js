@@ -66,6 +66,73 @@ function createShapeFromPolygon(polygon) {
   return shape;
 }
 
+/**
+ * Builds a seamless vertical-ended sheared prism from (x0,z0) [y0Bot..y0Top] to (x1,z1) [y1Bot..y1Top].
+ * Eliminates wedge gaps and staircase steps on sloped fences, retaining walls, rails, and parapets.
+ */
+function buildSlopedPrismGeo(x0, z0, y0Bot, y0Top, x1, z1, y1Bot, y1Top, thickness) {
+  const dx = x1 - x0;
+  const dz = z1 - z0;
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-4) return null;
+  const nx = (-dz / len) * (thickness * 0.5);
+  const nz = (dx / len) * (thickness * 0.5);
+
+  // 8 corners: 0..3 left side (+n), 4..7 right side (-n)
+  const v = [
+    [x0 + nx, y0Bot, z0 + nz], // 0: start bot L
+    [x0 + nx, y0Top, z0 + nz], // 1: start top L
+    [x1 + nx, y1Top, z1 + nz], // 2: end top L
+    [x1 + nx, y1Bot, z1 + nz], // 3: end bot L
+    [x0 - nx, y0Bot, z0 - nz], // 4: start bot R
+    [x0 - nx, y0Top, z0 - nz], // 5: start top R
+    [x1 - nx, y1Top, z1 - nz], // 6: end top R
+    [x1 - nx, y1Bot, z1 - nz], // 7: end bot R
+  ];
+  const quads = [
+    [0, 3, 2, 1], // +n side
+    [7, 4, 5, 6], // -n side
+    [1, 2, 6, 5], // top
+    [4, 7, 3, 0], // bottom
+    [4, 0, 1, 5], // start cap
+    [3, 7, 6, 2], // end cap
+  ];
+  const pos = [];
+  for (const [a, b, c, d] of quads) {
+    pos.push(...v[a], ...v[b], ...v[c], ...v[a], ...v[c], ...v[d]);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
+ * Computes true horizontal-arc-length UVs on extruded building side walls so rotated buildings
+ * NEVER have horizontally stretched or squashed windows.
+ */
+function applyTrueWallUVs(geo, tileMeters = 14.0) {
+  const pos = geo.attributes.position;
+  const norm = geo.attributes.normal;
+  const uv = geo.attributes.uv;
+  if (!pos || !norm || !uv) return;
+  const inv = 1 / tileMeters;
+  for (let i = 0; i < pos.count; i++) {
+    const ny = norm.getY(i);
+    if (Math.abs(ny) > 0.7) continue; // roof/bottom cap
+    const nx = norm.getX(i);
+    const nz = norm.getZ(i);
+    // Horizontal tangent perpendicular to wall normal in XZ plane
+    const len = Math.hypot(nx, nz) || 1;
+    const tx = -nz / len;
+    const tz = nx / len;
+    const u = (pos.getX(i) * tx + pos.getZ(i) * tz) * inv;
+    const v = pos.getY(i) * inv;
+    uv.setXY(i, u, v);
+  }
+  uv.needsUpdate = true;
+}
+
 function computePolygonBounds(polygon) {
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   let sumX = 0, sumZ = 0;
@@ -443,14 +510,16 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     }
   }
 
-  // Campus perimeter fences (실제 캠퍼스 외곽선 기준 담장 + 철제 펜스, 출입구는 개방)
+  // Campus perimeter fences & walls (seamless sheared-prism plinths/rails + architectural brick/stone piers)
   const fences = mapData.barriers || [];
   {
-    const plinthMat = new THREE.MeshLambertMaterial({ color: '#8b8f96' });
-    const railMat = new THREE.MeshLambertMaterial({ color: '#1f2933' });
-    const fenceSnowMat = new THREE.MeshLambertMaterial({ color: '#f1f6fb' });
-    const wallMat = new THREE.MeshLambertMaterial({ color: '#a7a29a' });
-    const postGeo = new THREE.BoxGeometry(0.09, 1.0, 0.09);
+    const plinthMat = new THREE.MeshStandardMaterial({ color: '#9c9890', roughness: 0.9 });
+    const pierBrickMat = new THREE.MeshStandardMaterial({ color: '#8f473c', roughness: 0.88 });
+    const pierCapMat = new THREE.MeshStandardMaterial({ color: '#c8c3ba', roughness: 0.85 });
+    const railMat = new THREE.MeshStandardMaterial({ color: '#1f2933', roughness: 0.55, metalness: 0.3 });
+    const fenceSnowMat = new THREE.MeshStandardMaterial({ color: '#eef4fa', roughness: 0.92 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: '#a59f96', roughness: 0.92 });
+    const postGeo = new THREE.BoxGeometry(0.08, 1.0, 0.08);
     const postSpots = [];
     const up = new THREE.Vector3(0, 1, 0);
 
@@ -458,12 +527,13 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       const [ax, az] = f.a;
       const [bx, bz] = f.b;
       const len = Math.hypot(bx - ax, bz - az);
-      if (len < 0.5) continue;
+      if (len < 0.8) continue;
       const ang = Math.atan2(bz - az, bx - ax);
       const isWall = f.type === 'wall';
-      const plinthH = isWall ? 2.1 : 0.65;
-      // Smoothly sloped pieces following exact endpoint heights (zero staircase gaps or floating rails)
+      const plinthH = isWall ? 2.1 : 0.72;
+      const railTopOff = 1.02;
       const pieces = Math.max(1, Math.ceil(len / 3.5));
+
       for (let k = 0; k < pieces; k++) {
         const t0 = k / pieces;
         const t1 = (k + 1) / pieces;
@@ -473,29 +543,45 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
         const z1 = az + (bz - az) * t1;
         const y0 = getTerrainHeight(x0, z0);
         const y1 = getTerrainHeight(x1, z1);
-        const mx = (x0 + x1) * 0.5;
-        const mz = (z0 + z1) * 0.5;
-        const my = (y0 + y1) * 0.5;
-        const segHoriz = len / pieces;
-        const dy = y1 - y0;
-        const slopeLen = Math.hypot(segHoriz, dy) + 0.08;
-        const slopePitch = Math.atan2(dy, segHoriz);
-        const rot = new THREE.Euler(0, -ang, slopePitch, 'YXZ');
-        const v = new THREE.Vector3();
-        // Solid plinth extending 1.6m below terrain so downhill side never floats
-        const totalPlinthH = plinthH + 1.6;
-        batch.add(new THREE.BoxGeometry(slopeLen, totalPlinthH, 0.34), isWall ? wallMat : plinthMat, v.set(mx, my + plinthH - totalPlinthH * 0.5, mz), 0, null, rot);
-        batch.add(new THREE.BoxGeometry(slopeLen, 0.08, 0.38), fenceSnowMat, v.set(mx, my + plinthH + 0.04, mz), 0, null, rot);
+
+        // Seamless sheared-prism stone plinth/wall (vertical end-faces -> zero V-gaps at slope bends)
+        const baseGeo = buildSlopedPrismGeo(x0, z0, y0 - 1.8, y0 + plinthH, x1, z1, y1 - 1.8, y1 + plinthH, isWall ? 0.44 : 0.36);
+        if (baseGeo) batch.add(baseGeo, isWall ? wallMat : plinthMat, ORIGIN);
+        // Stone coping cap + light snow trim
+        const capGeo = buildSlopedPrismGeo(x0, z0, y0 + plinthH, y0 + plinthH + 0.09, x1, z1, y1 + plinthH, y1 + plinthH + 0.09, isWall ? 0.52 : 0.42);
+        if (capGeo) batch.add(capGeo, pierCapMat, ORIGIN);
+        const snowGeo = buildSlopedPrismGeo(x0, z0, y0 + plinthH + 0.09, y0 + plinthH + 0.14, x1, z1, y1 + plinthH + 0.09, y1 + plinthH + 0.14, isWall ? 0.48 : 0.38);
+        if (snowGeo) batch.add(snowGeo, fenceSnowMat, ORIGIN);
+
         if (!isWall) {
-          batch.add(new THREE.BoxGeometry(slopeLen, 0.07, 0.07), railMat, v.set(mx, my + plinthH + 0.98, mz), 0, null, rot);
-          batch.add(new THREE.BoxGeometry(slopeLen, 0.05, 0.05), railMat, v.set(mx, my + plinthH + 0.45, mz), 0, null, rot);
+          // Seamless sloped top & mid wrought-iron rails
+          const topRail = buildSlopedPrismGeo(x0, z0, y0 + plinthH + railTopOff - 0.04, y0 + plinthH + railTopOff + 0.04, x1, z1, y1 + plinthH + railTopOff - 0.04, y1 + plinthH + railTopOff + 0.04, 0.07);
+          if (topRail) batch.add(topRail, railMat, ORIGIN);
+          const midRail = buildSlopedPrismGeo(x0, z0, y0 + plinthH + 0.22, y0 + plinthH + 0.28, x1, z1, y1 + plinthH + 0.22, y1 + plinthH + 0.28, 0.06);
+          if (midRail) batch.add(midRail, railMat, ORIGIN);
         }
       }
+
+      // Architectural brick/granite fence piers (담장 기둥) at ends & every ~6m (matching Roadview 광운대 담장)
+      const pierIntervals = Math.max(1, Math.round(len / 6.0));
+      const pierH = isWall ? plinthH + 0.25 : plinthH + railTopOff + 0.15;
+      const v = new THREE.Vector3();
+      for (let pIdx = 0; pIdx <= pierIntervals; pIdx++) {
+        const t = pIdx / pierIntervals;
+        const px = ax + (bx - ax) * t;
+        const pz = az + (bz - az) * t;
+        const py = getTerrainHeight(px, pz);
+        const totalPierH = pierH + 1.6;
+        batch.add(new THREE.BoxGeometry(0.54, totalPierH, 0.54), isWall ? wallMat : pierBrickMat, v.set(px, py + pierH - totalPierH * 0.5, pz), -ang);
+        batch.add(new THREE.BoxGeometry(0.64, 0.12, 0.64), pierCapMat, v.set(px, py + pierH + 0.06, pz), -ang);
+        batch.add(new THREE.BoxGeometry(0.58, 0.06, 0.58), fenceSnowMat, v.set(px, py + pierH + 0.15, pz), -ang);
+      }
+
       if (!isWall) {
-        const posts = Math.max(1, Math.floor(len / 0.55));
-        for (let k = 0; k <= posts; k++) {
+        const posts = Math.max(1, Math.floor(len / 0.45));
+        for (let k = 1; k < posts; k++) {
           const t = k / posts;
-          postSpots.push([ax + (bx - ax) * t, az + (bz - az) * t, ang]);
+          postSpots.push([ax + (bx - ax) * t, az + (bz - az) * t, ang, plinthH + railTopOff * 0.5]);
         }
       }
     }
@@ -505,9 +591,9 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       const q = new THREE.Quaternion();
       const one = new THREE.Vector3(1, 1, 1);
       const p = new THREE.Vector3();
-      postSpots.forEach(([x, z, ang], i) => {
+      postSpots.forEach(([x, z, ang, yOff], i) => {
         q.setFromAxisAngle(up, -ang);
-        m.compose(p.set(x, getTerrainHeight(x, z) + 1.1, z), q, one);
+        m.compose(p.set(x, getTerrainHeight(x, z) + yOff, z), q, one);
         postsI.setMatrixAt(i, m);
       });
       worldGroup.add(postsI);
@@ -623,6 +709,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   const wallMatCache = new Map();
   const roofMatCache = new Map();
   const plinthMatCache = new Map();
+  const parapetMatCache = new Map();
   const buildings = [];
 
   for (const b of mapData.buildings) {
@@ -648,11 +735,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     });
     geo.rotateX(-Math.PI / 2);
 
-    // Scale UVs on side walls so 4 texture floors align with ~14m real building height (~3.5m/floor)
-    const uv = geo.attributes.uv;
-    for (let i = 0; i < uv.count; i++) {
-      uv.setXY(i, uv.getX(i) * 0.072, uv.getY(i) * 0.072);
-    }
+    // True arc-length wall UVs (14m = 4 floors x 3.5m) -> ZERO stretched windows on rotated villas/buildings
+    applyTrueWallUVs(geo, 14.0);
 
     const texKey = `${b.facadeType || 'ribbon'}_${b.wallColor}`;
     if (!facadeCache.has(texKey)) {
@@ -683,7 +767,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
 
     const mesh = new THREE.Mesh(geo, [roofMat, wallMat]);
     mesh.position.y = bodyBaseY;
-    mesh.castShadow = b.isCampus || bodyHeight >= 16;
+    mesh.castShadow = b.isCampus || bodyHeight >= 9;
     mesh.receiveShadow = true;
 
     // 2) Foundation plinth / retaining base (기단부) extending solidly below downhill terrain
@@ -706,6 +790,25 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       const edgesGeo = new THREE.EdgesGeometry(geo, 24);
       const edges = new THREE.LineSegments(edgesGeo, edgeMat);
       mesh.add(edges);
+    }
+
+    // 3) Raised rooftop parapet wall (옥상 난간/파라펫) so flat roofs look like real Korean architecture
+    if (b.roofStyle !== 'hwado_pediment' && b.polygon.length >= 3) {
+      const pCol = b.wallColor || '#d5cfc4';
+      if (!parapetMatCache.has(pCol)) {
+        const col = new THREE.Color(pCol).lerp(new THREE.Color('#cfd4da'), 0.25);
+        parapetMatCache.set(pCol, new THREE.MeshStandardMaterial({ color: col, roughness: 0.88 }));
+      }
+      const parapetMat = parapetMatCache.get(pCol);
+      const roofTopY = bodyBaseY + bodyHeight;
+      const paraH = b.isCampus ? 0.95 : 0.75;
+      for (let i = 0; i < b.polygon.length; i++) {
+        const [x1, z1] = b.polygon[i];
+        const [x2, z2] = b.polygon[(i + 1) % b.polygon.length];
+        if (Math.hypot(x2 - x1, z2 - z1) < 0.4) continue;
+        const pGeo = buildSlopedPrismGeo(x1, z1, roofTopY - 0.05, roofTopY + paraH, x2, z2, roofTopY - 0.05, roofTopY + paraH, 0.34);
+        if (pGeo) batch.add(pGeo, parapetMat, ORIGIN);
+      }
     }
 
     // Add realistic Roadview/Skyview rooftop details strictly anchored INSIDE the polygon (never overhanging!)
