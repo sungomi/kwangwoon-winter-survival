@@ -90,8 +90,8 @@ function stairHeight(x, z) {
 }
 
 /* ---------------------------- building pad grading ---------------------------- */
-const PAD_APRON = 1.6;
-const PAD_BLEND = 6.5;
+const PAD_APRON = 4.2;
+const PAD_BLEND = 6.8;
 const PAD_MARGIN = PAD_APRON + PAD_BLEND;
 const PAD_GRID_CELL = 24;
 let padGrid = new Map();

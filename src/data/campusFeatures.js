@@ -21,11 +21,12 @@ export const PLAZA = {
   ringStep: 0.3,
 };
 
-// Grand staircase: from street level (a) up to the plaza edge (b)
+// Grand staircases: positioned cleanly in open corridors with zero building overlap
 export const STAIRS = [
-  { id: 'plaza-west', a: [-42, 10], b: [-24, 15], width: 11, toPlaza: true },
-  // library entrance steps (plaza level down into the 80주년기념관 forecourt)
-  { id: 'library-front', a: [-9, -6], b: [-7, 3], width: 9, toPlaza: true, down: true },
+  // West approach from 광운로 corridor between 80주년기념관 and 복지관 up to the plaza rim
+  { id: 'plaza-west', a: [-33, -1], b: [-21, 10], width: 8.5, toPlaza: true },
+  // Library entrance steps (80주년기념관 forecourt up to the north rim of the plaza)
+  { id: 'library-front', a: [-9, -11], b: [-7, 2], width: 8.5, toPlaza: true, down: true },
 ];
 
 // Raised planter terraces (cover + walls), stepping down to the south-east of the plaza
@@ -55,9 +56,9 @@ export const LIBRARY = {
   entranceFacing: 'plaza',
 };
 
-// Real gates from OSM (entrance=gate)
+// Real gates from OSM (entrance=gate), cleared of adjacent building corners
 export const GATES = [
-  { id: 'main', label: '광운대학교', sub: 'KWANGWOON UNIVERSITY · 정문', x: -66, z: 46, width: 14 },
+  { id: 'main', label: '광운대학교', sub: 'KWANGWOON UNIVERSITY · 정문', x: -73, z: 55, width: 11 },
   { id: 'back', label: '광운대학교 후문', sub: 'BACK GATE', x: 188, z: -61, width: 9 },
 ];
 

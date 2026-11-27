@@ -183,6 +183,7 @@ function loadGeoJson(geojson) {
         width: Math.max(10, maxX - minX),
         depth: Math.max(8, maxZ - minZ),
         rotation: 0,
+        polygon: pts,
       });
       continue;
     }
@@ -208,7 +209,7 @@ function loadGeoJson(geojson) {
     grasses,
     trees,
     campusOutlines: CAMPUS_OUTLINES,
-    barriers: buildFences(CAMPUS_OUTLINES, MAPPED_BARRIERS, roads),
+    barriers: buildFences(CAMPUS_OUTLINES, MAPPED_BARRIERS, roads, buildings),
     woods: WOODS,
   };
 }
@@ -244,14 +245,83 @@ function segIntersect(a, b, c, d) {
   return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
 }
 
+function pointInPoly2D(x, z, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i];
+    const [xj, zj] = poly[j];
+    if (zi > z !== zj > z && x < ((xj - xi) * (z - zi)) / (zj - zi + 1e-9) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function pointNearAnyBuilding(x, z, buildingMeta, pad = 2.0) {
+  for (let i = 0; i < buildingMeta.length; i++) {
+    const b = buildingMeta[i];
+    if (x < b.minX - pad || x > b.maxX + pad || z < b.minZ - pad || z > b.maxZ + pad) continue;
+    if (pointInPoly2D(x, z, b.polygon)) return true;
+    const poly = b.polygon;
+    for (let k = 0; k < poly.length; k++) {
+      const p1 = poly[k];
+      const p2 = poly[(k + 1) % poly.length];
+      const dx = p2[0] - p1[0];
+      const dz = p2[1] - p1[1];
+      const l2 = dx * dx + dz * dz;
+      let t = l2 > 1e-9 ? ((x - p1[0]) * dx + (z - p1[1]) * dz) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      if (Math.hypot(x - (p1[0] + dx * t), z - (p1[1] + dz * t)) < pad) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Campus perimeter fences (교내 담장/펜스) following the real OSM campus outline.
- * Gates are cut wherever a road or footpath crosses the outline, so every real entrance stays open.
+ * Gates are cut wherever a road or footpath crosses the outline, and segments overlapping
+ * buildings are cleanly trimmed so fences never stab into building walls.
  */
-function buildFences(outlines, mapped, roads) {
+function buildFences(outlines, mapped, roads, buildings = []) {
   const fences = [];
   const GATE_HALF = 5.5;
   const gates = placeGates(outlines);
+  const buildingMeta = buildings
+    .filter((b) => b.polygon && b.polygon.length >= 3)
+    .map((b) => {
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const [x, z] of b.polygon) {
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      }
+      return { polygon: b.polygon, minX, maxX, minZ, maxZ };
+    });
+
+  function emitClippedSegment(type, a, b) {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (len < 1.0) return;
+    // Sample every 1.5m along the segment and only emit sub-spans clear of buildings
+    const samples = Math.max(2, Math.ceil(len / 1.5));
+    let spanStart = null;
+    for (let s = 0; s <= samples; s++) {
+      const t = s / samples;
+      const px = a[0] + (b[0] - a[0]) * t;
+      const pz = a[1] + (b[1] - a[1]) * t;
+      const blocked = pointNearAnyBuilding(px, pz, buildingMeta, 1.8);
+      if (!blocked && spanStart === null) {
+        spanStart = t;
+      } else if ((blocked || s === samples) && spanStart !== null) {
+        const spanEnd = blocked ? (s - 1) / samples : 1;
+        if ((spanEnd - spanStart) * len >= 1.2) {
+          fences.push({
+            type,
+            a: [a[0] + (b[0] - a[0]) * spanStart, a[1] + (b[1] - a[1]) * spanStart],
+            b: [a[0] + (b[0] - a[0]) * spanEnd, a[1] + (b[1] - a[1]) * spanEnd],
+          });
+        }
+        spanStart = null;
+      }
+    }
+  }
+
   outlines.forEach((ring, ringIdx) => {
     for (let i = 0; i < ring.length - 1; i++) {
       const a = ring[i];
@@ -264,14 +334,14 @@ function buildFences(outlines, mapped, roads) {
         for (let k = 0; k < r.points.length - 1; k++) {
           const t = segIntersect(a, b, r.points[k], r.points[k + 1]);
           if (t === null) continue;
-          const halfT = (Math.max(GATE_HALF, (r.width || 6) * 0.5 + 2) / len);
+          const halfT = Math.max(GATE_HALF, (r.width || 6) * 0.5 + 2) / len;
           cuts.push([t - halfT, t + halfT]);
         }
       }
       // real gates (정문/후문) open the fence for their full width
       for (const g of gates) {
         if (g.ring !== ringIdx || g.edge !== i) continue;
-        const halfT = (g.width / 2 + 1.8) / len;
+        const halfT = (g.width / 2 + 2.2) / len;
         cuts.push([g.t - halfT, g.t + halfT]);
       }
       cuts.sort((p, q) => p[0] - q[0]);
@@ -284,17 +354,17 @@ function buildFences(outlines, mapped, roads) {
 
       function pushPiece(t0, t1) {
         if ((t1 - t0) * len < 1.2) return;
-        fences.push({
-          type: 'campus',
-          a: [a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0],
-          b: [a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1],
-        });
+        emitClippedSegment(
+          'campus',
+          [a[0] + (b[0] - a[0]) * t0, a[1] + (b[1] - a[1]) * t0],
+          [a[0] + (b[0] - a[0]) * t1, a[1] + (b[1] - a[1]) * t1]
+        );
       }
     }
   });
   for (const m of mapped) {
     for (let i = 0; i < m.points.length - 1; i++) {
-      fences.push({ type: m.type, a: m.points[i], b: m.points[i + 1] });
+      emitClippedSegment(m.type, m.points[i], m.points[i + 1]);
     }
   }
   return fences;
