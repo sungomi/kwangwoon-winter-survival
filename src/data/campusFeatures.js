@@ -58,7 +58,7 @@ export const LIBRARY = {
 
 // Real gates from OSM (entrance=gate), cleared of adjacent building corners
 export const GATES = [
-  { id: 'main', label: '광운대학교', sub: 'KWANGWOON UNIVERSITY · 정문', x: -73, z: 55, width: 11 },
+  { id: 'main', label: '광운대학교', sub: 'KWANGWOON UNIVERSITY · 정문', x: -76, z: 58, width: 10.5 },
   { id: 'back', label: '광운대학교 후문', sub: 'BACK GATE', x: 188, z: -61, width: 9 },
 ];
 

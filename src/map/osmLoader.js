@@ -1,6 +1,7 @@
 import { getKwangwoonFallbackMap } from '../data/kwangwoonFallback.js';
 import { placeGates } from './gates.js';
 import { CAMPUS_OUTLINES, MAPPED_BARRIERS, WOODS } from '../data/campusBoundary.js';
+import { STAIRS } from '../data/campusFeatures.js';
 
 const METERS_PER_LAT = 111320;
 
@@ -219,15 +220,49 @@ function loadGeoJson(geojson) {
 
   if (removed.length) console.info('[map] removed OSM sliver buildings:', removed);
 
-  if (buildings.length < 5) return getKwangwoonFallbackMap();
+  // Deduplicate overlapping off-campus OSM building parts (keeps campus & larger/named buildings first)
+  const cleanBuildings = [];
+  const sorted = [...buildings].sort((a, b) => {
+    if (a.isCampus !== b.isCampus) return a.isCampus ? -1 : 1;
+    if (!!a.name !== !!b.name) return a.name ? -1 : 1;
+    return measureFootprint(b.polygon).area - measureFootprint(a.polygon).area;
+  });
+  const keptMeta = [];
+  for (const b of sorted) {
+    if (!b.isCampus && !b.name) {
+      let overlapPts = 0;
+      let sx = 0, sz = 0;
+      for (const [x, z] of b.polygon) { sx += x; sz += z; }
+      const cx = sx / b.polygon.length, cz = sz / b.polygon.length;
+      const centroidInside = keptMeta.some(
+        (k) => cx >= k.minX && cx <= k.maxX && cz >= k.minZ && cz <= k.maxZ && pointInPoly2D(cx, cz, k.polygon)
+      );
+      if (centroidInside) continue;
+      for (const [x, z] of b.polygon) {
+        if (keptMeta.some((k) => x >= k.minX && x <= k.maxX && z >= k.minZ && z <= k.maxZ && pointInPoly2D(x, z, k.polygon))) {
+          overlapPts++;
+        }
+      }
+      if (overlapPts / b.polygon.length >= 0.35) continue;
+    }
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const [x, z] of b.polygon) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    }
+    keptMeta.push({ polygon: b.polygon, minX, maxX, minZ, maxZ });
+    cleanBuildings.push(b);
+  }
+
+  if (cleanBuildings.length < 5) return getKwangwoonFallbackMap();
   return {
-    buildings,
+    buildings: cleanBuildings,
     roads,
     pitches,
     grasses,
     trees,
     campusOutlines: CAMPUS_OUTLINES,
-    barriers: buildFences(CAMPUS_OUTLINES, MAPPED_BARRIERS, roads, buildings),
+    barriers: buildFences(CAMPUS_OUTLINES, MAPPED_BARRIERS, roads, cleanBuildings),
     woods: WOODS,
   };
 }
@@ -313,22 +348,51 @@ function buildFences(outlines, mapped, roads, buildings = []) {
       return { polygon: b.polygon, minX, maxX, minZ, maxZ };
     });
 
+  function pointBlockedForFence(x, z) {
+    if (pointNearAnyBuilding(x, z, buildingMeta, 2.8)) return true;
+    // Keep stairs approaches (plaza-west, library-front) 100% open
+    for (const st of STAIRS) {
+      const dx = st.b[0] - st.a[0];
+      const dz = st.b[1] - st.a[1];
+      const len = Math.hypot(dx, dz) || 1;
+      const ux = dx / len, uz = dz / len;
+      const rx = x - st.a[0], rz = z - st.a[1];
+      const along = rx * ux + rz * uz;
+      const across = Math.abs(-rx * uz + rz * ux);
+      if (along > -5.5 && along < len + 3.5 && across < st.width * 0.5 + 3.0) return true;
+    }
+    // Never run a fence down or across an asphalt road
+    for (const r of roads) {
+      const clearance = (r.width || 6) * 0.5 + 1.2;
+      const pts = r.points;
+      for (let k = 0; k < pts.length - 1; k++) {
+        const p1 = pts[k], p2 = pts[k + 1];
+        const dx = p2[0] - p1[0], dz = p2[1] - p1[1];
+        const l2 = dx * dx + dz * dz;
+        let t = l2 > 1e-9 ? ((x - p1[0]) * dx + (z - p1[1]) * dz) / l2 : 0;
+        t = t < 0 ? 0 : t > 1 ? 1 : t;
+        if (Math.hypot(x - (p1[0] + dx * t), z - (p1[1] + dz * t)) < clearance) return true;
+      }
+    }
+    return false;
+  }
+
   function emitClippedSegment(type, a, b) {
     const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (len < 1.0) return;
-    // Sample every 1.5m along the segment and only emit sub-spans clear of buildings
-    const samples = Math.max(2, Math.ceil(len / 1.5));
+    if (len < 1.5) return;
+    // Sample every 1.2m along the segment and only emit sub-spans clear of buildings, roads & stairs
+    const samples = Math.max(2, Math.ceil(len / 1.2));
     let spanStart = null;
     for (let s = 0; s <= samples; s++) {
       const t = s / samples;
       const px = a[0] + (b[0] - a[0]) * t;
       const pz = a[1] + (b[1] - a[1]) * t;
-      const blocked = pointNearAnyBuilding(px, pz, buildingMeta, 1.8);
+      const blocked = pointBlockedForFence(px, pz);
       if (!blocked && spanStart === null) {
         spanStart = t;
       } else if ((blocked || s === samples) && spanStart !== null) {
         const spanEnd = blocked ? (s - 1) / samples : 1;
-        if ((spanEnd - spanStart) * len >= 1.2) {
+        if ((spanEnd - spanStart) * len >= 2.2) {
           fences.push({
             type,
             a: [a[0] + (b[0] - a[0]) * spanStart, a[1] + (b[1] - a[1]) * spanStart],

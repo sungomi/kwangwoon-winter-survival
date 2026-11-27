@@ -3,7 +3,7 @@ import { createBuildingFacadeTexture, createPitchTexture } from './textures.js';
 import { getTerrainHeight, getFootprintMinHeight, registerBuildingPads } from './terrain.js';
 import { createStaticBatcher } from '../utils/mergeByMaterial.js';
 import { buildCampusFeatures } from './campusFeatures3d.js';
-import { PLAZA } from '../data/campusFeatures.js';
+import { PLAZA, LIBRARY_LAWN } from '../data/campusFeatures.js';
 import { STAIR_FLIGHTS } from './terrain.js';
 
 function onBuiltLandscape(x, z, pad = 0) {
@@ -111,12 +111,13 @@ function buildSlopedPrismGeo(x0, z0, y0Bot, y0Top, x1, z1, y1Bot, y1Top, thickne
  * Computes true horizontal-arc-length UVs on extruded building side walls so rotated buildings
  * NEVER have horizontally stretched or squashed windows.
  */
-function applyTrueWallUVs(geo, tileMeters = 14.0) {
+function applyTrueWallUVs(geo, tileU = 10.5, tileV = 14.0) {
   const pos = geo.attributes.position;
   const norm = geo.attributes.normal;
   const uv = geo.attributes.uv;
   if (!pos || !norm || !uv) return;
-  const inv = 1 / tileMeters;
+  const invU = 1 / tileU;
+  const invV = 1 / tileV;
   for (let i = 0; i < pos.count; i++) {
     const ny = norm.getY(i);
     if (Math.abs(ny) > 0.7) continue; // roof/bottom cap
@@ -126,8 +127,8 @@ function applyTrueWallUVs(geo, tileMeters = 14.0) {
     const len = Math.hypot(nx, nz) || 1;
     const tx = -nz / len;
     const tz = nx / len;
-    const u = (pos.getX(i) * tx + pos.getZ(i) * tz) * inv;
-    const v = pos.getY(i) * inv;
+    const u = (pos.getX(i) * tx + pos.getZ(i) * tz) * invU;
+    const v = pos.getY(i) * invV;
     uv.setXY(i, u, v);
   }
   uv.needsUpdate = true;
@@ -162,6 +163,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   scene.add(worldGroup);
   // Everything static is queued here and merged into one mesh per material at the end
   const batch = createStaticBatcher();
+  // Ground-hugging surfaces (roads, pitches, grass) never cast shadows -> zero shadow-banding stripes!
+  const flatBatch = createStaticBatcher();
   const ORIGIN = new THREE.Vector3();
 
   // Snowy winter hilly terrain plane (3m grid spacing < 4.2m building pad apron -> zero wall slicing)
@@ -203,10 +206,10 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     geo.computeVertexNormals();
-    batch.add(geo, grassMat, ORIGIN);
+    flatBatch.add(geo, grassMat, ORIGIN);
   }
 
-  // Winter roads hugging the hill terrain (3m subdivision + joint caps to eliminate V-notches)
+  // Winter roads hugging the hill terrain (3m subdivision + joint caps + castShadow:false -> zero banding)
   const roadMat = new THREE.MeshLambertMaterial({ color: '#394350', side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
   for (const road of mapData.roads || []) {
     const pts = road.points;
@@ -234,8 +237,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
         const rx = cx - nx;
         const rz = cz - nz;
         const cy = getTerrainHeight(cx, cz);
-        verts.push(lx, Math.max(getTerrainHeight(lx, lz), cy - 0.12) + 0.19, lz);
-        verts.push(rx, Math.max(getTerrainHeight(rx, rz), cy - 0.12) + 0.19, rz);
+        verts.push(lx, Math.max(getTerrainHeight(lx, lz), cy - 0.1) + 0.22, lz);
+        verts.push(rx, Math.max(getTerrainHeight(rx, rz), cy - 0.1) + 0.22, rz);
         if (s < subSteps) {
           const base = s * 2;
           indices.push(base, base + 1, base + 2, base + 1, base + 3, base + 2);
@@ -246,13 +249,13 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
       geo.setIndex(indices);
       geo.computeVertexNormals();
-      batch.add(geo, roadMat, ORIGIN);
+      flatBatch.add(geo, roadMat, ORIGIN);
 
       // Circular joint cap at polyline bends so road turns have zero V-notches
       if (i > 0) {
         const cap = new THREE.CircleGeometry(halfW, 10);
         cap.rotateX(-Math.PI / 2);
-        batch.add(cap, roadMat, new THREE.Vector3(x1, getTerrainHeight(x1, z1) + 0.19, z1));
+        flatBatch.add(cap, roadMat, new THREE.Vector3(x1, getTerrainHeight(x1, z1) + 0.22, z1));
       }
     }
   }
@@ -295,9 +298,10 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   ];
 
   for (const c of coverSpecs) {
-    // Cover is never fused into a building: skip any spot that overlaps a real footprint
+    // Cover is never fused into a building or placed on the plaza/stairs/library lawn
     if (nearAnyBuilding(c.x, c.z, mapData.buildings, Math.max(c.w, c.d) * 0.5 + 1.5)) continue;
     if (onBuiltLandscape(c.x, c.z, Math.max(c.w, c.d) * 0.5 + 1)) continue;
+    if (pointInPoly(c.x, c.z, LIBRARY_LAWN.polygon)) continue;
     const baseY = getTerrainHeight(c.x, c.z) - 0.3;
     const grp = new THREE.Group();
     grp.position.set(c.x, baseY, c.z);
@@ -417,7 +421,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
       geo.computeVertexNormals();
-      batch.add(geo, p.type === 'basketball' ? basketMat : soccerMat, ORIGIN);
+      flatBatch.add(geo, p.type === 'basketball' ? basketMat : soccerMat, ORIGIN);
     } else {
       if (nearAnyBuilding(p.center[0], p.center[1], mapData.buildings, 1.0)) continue;
       const tex = createPitchTexture(p.type);
@@ -521,6 +525,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     const wallMat = new THREE.MeshStandardMaterial({ color: '#a59f96', roughness: 0.92 });
     const postGeo = new THREE.BoxGeometry(0.08, 1.0, 0.08);
     const postSpots = [];
+    const placedPiers = [];
     const up = new THREE.Vector3(0, 1, 0);
 
     for (const f of fences) {
@@ -562,7 +567,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
         }
       }
 
-      // Architectural brick/granite fence piers (담장 기둥) at ends & every ~6m (matching Roadview 광운대 담장)
+      // Architectural brick/granite fence piers (deduplicated at shared corners -> zero double offset caps!)
       const pierIntervals = Math.max(1, Math.round(len / 6.0));
       const pierH = isWall ? plinthH + 0.25 : plinthH + railTopOff + 0.15;
       const v = new THREE.Vector3();
@@ -570,11 +575,14 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
         const t = pIdx / pierIntervals;
         const px = ax + (bx - ax) * t;
         const pz = az + (bz - az) * t;
+        if (placedPiers.some(([ox, oz]) => Math.hypot(ox - px, oz - pz) < 0.9)) continue;
+        placedPiers.push([px, pz]);
         const py = getTerrainHeight(px, pz);
-        const totalPierH = pierH + 1.6;
-        batch.add(new THREE.BoxGeometry(0.54, totalPierH, 0.54), isWall ? wallMat : pierBrickMat, v.set(px, py + pierH - totalPierH * 0.5, pz), -ang);
-        batch.add(new THREE.BoxGeometry(0.64, 0.12, 0.64), pierCapMat, v.set(px, py + pierH + 0.06, pz), -ang);
-        batch.add(new THREE.BoxGeometry(0.58, 0.06, 0.58), fenceSnowMat, v.set(px, py + pierH + 0.15, pz), -ang);
+        const totalPierH = pierH + 2.2;
+        const pierAng = pIdx === 0 || pIdx === pierIntervals ? 0 : -ang;
+        batch.add(new THREE.BoxGeometry(0.54, totalPierH, 0.54), isWall ? wallMat : pierBrickMat, v.set(px, py + pierH - totalPierH * 0.5, pz), pierAng);
+        batch.add(new THREE.BoxGeometry(0.64, 0.12, 0.64), pierCapMat, v.set(px, py + pierH + 0.06, pz), pierAng);
+        batch.add(new THREE.BoxGeometry(0.58, 0.06, 0.58), fenceSnowMat, v.set(px, py + pierH + 0.15, pz), pierAng);
       }
 
       if (!isWall) {
@@ -604,7 +612,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   const twinkleLights = [];
   const garlandBase = ['#ff3b30', '#34c759', '#ffd60a'].map((c) => new THREE.Color(c));
   const garlandMats = garlandBase.map((c) => new THREE.MeshBasicMaterial({ color: c.clone() }));
-  const garlandBulbGeo = new THREE.SphereGeometry(0.45, 6, 5);
+  const garlandBulbGeo = new THREE.SphereGeometry(0.22, 6, 5);
   const xmasTree = new THREE.Group();
   // sits in the middle of the sunken round plaza
   xmasTree.position.set(PLAZA.x, getTerrainHeight(PLAZA.x, PLAZA.z), PLAZA.z);
@@ -631,12 +639,12 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     xmasTree.add(tierMesh);
   });
 
-  // Glowing golden star on top
+  // Glowing golden star seated directly on the top tip of the tree (19.5 + 3.5 = 23.0)
   const starMesh = new THREE.Mesh(
-    new THREE.OctahedronGeometry(2.1, 0),
+    new THREE.OctahedronGeometry(1.75, 0),
     new THREE.MeshBasicMaterial({ color: '#ffd94a' })
   );
-  starMesh.position.y = 24.4;
+  starMesh.position.y = 23.2;
   xmasTree.add(starMesh);
 
   // Ornaments & warm plaza light
@@ -718,10 +726,10 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     // Leveled pad height (guaranteed by registerBuildingPads so no floor is buried on slopes)
     const padY = b.padY !== undefined ? b.padY : getTerrainHeight(bounds.cx, bounds.cz);
     const minFootY = getFootprintMinHeight(b.polygon);
-    // Visible 0.85m stone foundation plinth above padY keeps all 1st-floor windows cleanly above snow
+    // Visible 0.85m stone foundation plinth above padY, rooted 6m underground -> zero floating corners
     const VISIBLE_PLINTH = 0.85;
-    const plinthBottom = Math.min(minFootY, padY) - 2.6;
-    const plinthHeight = Math.max(1.2, padY + VISIBLE_PLINTH - plinthBottom + 0.06);
+    const plinthBottom = Math.min(minFootY, padY) - 6.0;
+    const plinthHeight = Math.max(1.5, padY + VISIBLE_PLINTH - plinthBottom);
     const bodyBaseY = padY + VISIBLE_PLINTH;
     const bodyHeight = Math.max(4.0, b.height - VISIBLE_PLINTH);
 
@@ -735,8 +743,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     });
     geo.rotateX(-Math.PI / 2);
 
-    // True arc-length wall UVs (14m = 4 floors x 3.5m) -> ZERO stretched windows on rotated villas/buildings
-    applyTrueWallUVs(geo, 14.0);
+    // True arc-length wall UVs (10.5m horizontal x 14m vertical) -> crisp Korean window proportions
+    applyTrueWallUVs(geo, 10.5, 14.0);
 
     const texKey = `${b.facadeType || 'ribbon'}_${b.wallColor}`;
     if (!facadeCache.has(texKey)) {
@@ -781,7 +789,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     });
     plinthGeo.rotateX(-Math.PI / 2);
     const plinthMesh = new THREE.Mesh(plinthGeo, plinthMatCache.get(plinthColor));
-    plinthMesh.position.y = -plinthHeight + 0.06;
+    // Flush at y=0 (zero coplanar overlap with body -> eliminates z-fighting teeth!)
+    plinthMesh.position.y = -plinthHeight;
     plinthMesh.castShadow = b.isCampus;
     plinthMesh.receiveShadow = true;
     mesh.add(plinthMesh);
@@ -792,7 +801,9 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       mesh.add(edges);
     }
 
-    // 3) Raised rooftop parapet wall (옥상 난간/파라펫) so flat roofs look like real Korean architecture
+    // 3) Raised rooftop parapet wall (옥상 난간/파라펫) on all flat-roof buildings including tall apartments
+    const paraH = b.isCampus ? 0.95 : bodyHeight >= 24 ? 1.1 : 0.78;
+    const paraThick = bodyHeight >= 24 ? 0.48 : 0.36;
     if (b.roofStyle !== 'hwado_pediment' && b.polygon.length >= 3) {
       const pCol = b.wallColor || '#d5cfc4';
       if (!parapetMatCache.has(pCol)) {
@@ -801,12 +812,11 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       }
       const parapetMat = parapetMatCache.get(pCol);
       const roofTopY = bodyBaseY + bodyHeight;
-      const paraH = b.isCampus ? 0.95 : 0.75;
       for (let i = 0; i < b.polygon.length; i++) {
         const [x1, z1] = b.polygon[i];
         const [x2, z2] = b.polygon[(i + 1) % b.polygon.length];
         if (Math.hypot(x2 - x1, z2 - z1) < 0.4) continue;
-        const pGeo = buildSlopedPrismGeo(x1, z1, roofTopY - 0.05, roofTopY + paraH, x2, z2, roofTopY - 0.05, roofTopY + paraH, 0.34);
+        const pGeo = buildSlopedPrismGeo(x1, z1, roofTopY - 0.05, roofTopY + paraH, x2, z2, roofTopY - 0.05, roofTopY + paraH, paraThick);
         if (pGeo) batch.add(pGeo, parapetMat, ORIGIN);
       }
     }
@@ -870,16 +880,14 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
         mesh.add(terrace);
       }
     } else if (b.roofStyle === 'rooftop_turf') {
-      // 동해문화예술관: bright green rooftop sports turf strictly inside roof polygon
+      // 동해문화예술관: muted architectural rooftop green terrace strictly inside roof polygon
       if (safeSpan >= 8) {
-        const courtTex = createPitchTexture('soccer');
-        const cSize = Math.min(18, safeSpan * 0.92);
+        const cSize = Math.min(18, safeSpan * 0.88);
         const court = new THREE.Mesh(
-          new THREE.PlaneGeometry(cSize, cSize * 0.68),
-          new THREE.MeshLambertMaterial({ map: courtTex })
+          new THREE.BoxGeometry(cSize, 0.22, cSize * 0.65),
+          new THREE.MeshStandardMaterial({ color: '#4c7d5c', roughness: 0.9 })
         );
-        court.rotation.x = -Math.PI / 2;
-        court.position.set(anchor.x, bodyHeight + 0.12, anchor.z);
+        court.position.set(anchor.x, bodyHeight + 0.11, anchor.z);
         mesh.add(court);
       }
     } else if (safeSpan >= 6.5) {
@@ -891,22 +899,29 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       const pentMesh = new THREE.Mesh(pentGeo, pentMat);
       pentMesh.position.set(anchor.x, bodyHeight + pentH / 2, anchor.z);
       pentMesh.castShadow = true;
-      pentMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(pentGeo), edgeMat));
+      // Stepped dark roof cap on mechanical penthouse so it never looks like a plain grey box
+      const capMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(pentW + 0.4, 0.25, pentD + 0.4),
+        new THREE.MeshStandardMaterial({ color: '#5c646d', roughness: 0.85 })
+      );
+      capMesh.position.y = pentH / 2 + 0.12;
+      pentMesh.add(capMesh);
       mesh.add(pentMesh);
     }
 
-    // Subtle Christmas roof-edge light garlands on key campus buildings (resting cleanly on parapet)
+    // Subtle Christmas roof-edge light garlands seated neatly ON TOP of parapet (zero cornice clipping!)
     if (b.isCampus && b.polygon.length >= 3) {
+      const bulbY = bodyBaseY + bodyHeight + (b.roofStyle === 'hwado_pediment' ? 0.95 : paraH) + 0.18;
       for (let i = 0; i < b.polygon.length - 1; i++) {
         const [x1, z1] = b.polygon[i];
         const [x2, z2] = b.polygon[i + 1];
         const segLen = Math.hypot(x2 - x1, z2 - z1);
-        const steps = Math.max(1, Math.floor(segLen / 10));
-        for (let s = 0; s < steps; s++) {
+        const steps = Math.max(1, Math.floor(segLen / 12));
+        for (let s = 1; s < steps; s++) {
           const t = s / steps;
           const bx = x1 + (x2 - x1) * t;
           const bz = z1 + (z2 - z1) * t;
-          batch.add(garlandBulbGeo, garlandMats[(i + s) % garlandMats.length], new THREE.Vector3(bx, bodyBaseY + bodyHeight + 0.3, bz));
+          batch.add(garlandBulbGeo, garlandMats[(i + s) % garlandMats.length], new THREE.Vector3(bx, bulbY, bz));
         }
       }
     }
@@ -945,25 +960,37 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   const projVec = new THREE.Vector3();
 
   function updateLabels(camera, width, height, isFirstPerson) {
+    // Project visible campus labels sorted nearest-first and cull screen-space overlaps / HUD collisions
+    const candidates = [];
     for (const b of buildings) {
       if (!b.labelEl) continue;
-      projVec.set(b.bounds.cx, b.baseY + b.height + 6.0, b.bounds.cz);
+      projVec.set(b.bounds.cx, b.baseY + b.height + 5.5, b.bounds.cz);
       const dist = camera.position.distanceTo(projVec);
       projVec.project(camera);
-
       const isBehind = projVec.z > 1;
-      const tooFar = isFirstPerson && dist > 160;
-      if (isBehind || tooFar) {
+      const tooFar = isFirstPerson ? dist > 115 : dist > 420;
+      const x = (projVec.x * 0.5 + 0.5) * width;
+      const y = (-projVec.y * 0.5 + 0.5) * height;
+      // Keep labels clear of the top compass & HUD bars
+      if (isBehind || tooFar || y < 74 || y > height - 95 || x < 40 || x > width - 40) {
         b.labelEl.style.display = 'none';
         continue;
       }
-
-      const x = (projVec.x * 0.5 + 0.5) * width;
-      const y = (-projVec.y * 0.5 + 0.5) * height;
-      b.labelEl.style.display = 'block';
-      b.labelEl.style.left = `${x}px`;
-      b.labelEl.style.top = `${y}px`;
-      b.labelEl.classList.toggle('destroyed', b.destroyed);
+      candidates.push({ b, x, y, dist });
+    }
+    candidates.sort((a, b) => a.dist - b.dist);
+    const placed = [];
+    for (const c of candidates) {
+      const overlaps = placed.some((p) => Math.abs(p.x - c.x) < 92 && Math.abs(p.y - c.y) < 26);
+      if (overlaps) {
+        c.b.labelEl.style.display = 'none';
+        continue;
+      }
+      placed.push(c);
+      c.b.labelEl.style.display = 'block';
+      c.b.labelEl.style.left = `${c.x}px`;
+      c.b.labelEl.style.top = `${c.y}px`;
+      c.b.labelEl.classList.toggle('destroyed', c.b.destroyed);
     }
   }
 
@@ -982,6 +1009,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   const landscape = buildCampusFeatures(worldGroup, batch, buildings, mapData.campusOutlines);
   covers.push(...landscape.extraCovers);
 
+  flatBatch.flush(worldGroup, { castShadow: false, receiveShadow: true });
   batch.flush(worldGroup);
 
   function animateFestive(time) {

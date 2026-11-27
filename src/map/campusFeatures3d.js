@@ -134,9 +134,9 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
       const p0 = [x + Math.cos(a0) * (radius + 0.25), z + Math.sin(a0) * (radius + 0.25)];
       const p1 = [x + Math.cos(a1) * (radius + 0.25), z + Math.sin(a1) * (radius + 0.25)];
       const len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) + 0.08;
-      // Solid retaining skirt all around the plaza extending 2.4m underground
-      const skirtH = Math.max(0.6, drop) + 2.4;
-      batch.add(new THREE.BoxGeometry(len, skirtH, 0.55), M.granite, V(ex, top + 0.08 - skirtH / 2, ez), -am + Math.PI / 2);
+      // Solid thick retaining skirt all around the plaza extending 4.0m underground (zero snow spikes!)
+      const skirtH = Math.max(0.8, drop) + 4.0;
+      batch.add(new THREE.BoxGeometry(len + 0.08, skirtH, 0.95), M.granite, V(ex, top + 0.1 - skirtH / 2, ez), -am + Math.PI / 2);
       if (!inStair) {
         // Continuous granite curb all around the plaza rim
         batch.add(new THREE.BoxGeometry(len, 0.36, 0.46), M.graniteDark, V(ex, top + 0.24, ez), -am + Math.PI / 2);
@@ -165,10 +165,10 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
       const h = f.hA + (f.hB - f.hA) * t + 0.08;
       const cx = f.ax + f.ux * f.len * t;
       const cz = f.az + f.uz * f.len * t;
-      // Solid monolithic riser rooted 2.2m below low end so treads NEVER float or clip
-      const bottomY = low - 2.2;
-      const height = Math.max(0.4, h - bottomY);
-      const depth = run * 1.18;
+      // Solid monolithic riser rooted 4.5m below low end so treads NEVER float or show sawtooth underside
+      const bottomY = low - 4.5;
+      const height = Math.max(0.5, h - bottomY);
+      const depth = run * 1.25;
       batch.add(new THREE.BoxGeometry(depth, height, f.width), M.granite, V(cx, bottomY + height / 2, cz), -ang);
       batch.add(new THREE.BoxGeometry(depth * 0.92, 0.04, f.width - 0.14), M.snow, V(cx, h + 0.02, cz), -ang);
       batch.add(
@@ -178,15 +178,15 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
         -ang
       );
     }
-    // Continuous sloped cheek walls + handrails on both sides
+    // Continuous sloped cheek walls (deeply rooted) + handrails on both sides
     const midX = (f.ax + f.bx) * 0.5;
     const midZ = (f.az + f.bz) * 0.5;
     const midH = (f.hA + f.hB) * 0.5 + 0.08;
     for (const side of [-1, 1]) {
       const ox = -f.uz * side * (f.width / 2 + 0.24);
       const oz = f.ux * side * (f.width / 2 + 0.24);
-      // Continuous sloped granite stringer/cheek wall
-      batch.add(new THREE.BoxGeometry(slopeLen + 0.4, 2.8, 0.45), M.graniteDark, V(midX + ox, midH - 0.85, midZ + oz), 0, null, railRot);
+      // Continuous deeply-rooted sloped granite stringer/cheek wall
+      batch.add(new THREE.BoxGeometry(slopeLen + 0.6, 5.2, 0.5), M.graniteDark, V(midX + ox, midH - 2.0, midZ + oz), 0, null, railRot);
       // Continuous sloped handrail
       batch.add(new THREE.BoxGeometry(slopeLen + 0.3, 0.07, 0.08), M.rail, V(midX + ox, midH + 1.05, midZ + oz), 0, null, railRot);
       const postCount = Math.max(2, Math.ceil(f.len / 2.2));
@@ -364,9 +364,9 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
     }
   }
 
-  // Library lawn garden with crossing paths (fine 1.5m grid + polygonOffset to eliminate z-fighting)
+  // Library lawn garden with crossing paths (fine 1.5m grid lifted cleanly above terrain)
   {
-    const lawn = tessellateOnTerrain(LIBRARY_LAWN.polygon, 1.5, 0.14);
+    const lawn = tessellateOnTerrain(LIBRARY_LAWN.polygon, 1.5, 0.22);
     if (lawn) batch.add(lawn, M.lawn, V(0, 0, 0));
     for (const [[x1, z1], [x2, z2]] of LIBRARY_LAWN.paths) {
       const len = Math.hypot(x2 - x1, z2 - z1);
@@ -407,8 +407,15 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
     const gy = getTerrainHeight(g.x, g.z);
     const isMain = g.id === 'main';
 
-    // Paved granite threshold pad underneath the gate portal
-    batch.add(new THREE.BoxGeometry(g.width + 6.0, 0.25, 5.4), M.paving, V(g.x, gy + 0.04, g.z), -ang);
+    // Paved granite entry road extending cleanly through the gate into campus (no raw snow dead-end)
+    const nx = -uz;
+    const nz = ux;
+    for (let s = -2; s <= 4; s++) {
+      const rx = g.x + nx * s * 3.0;
+      const rz = g.z + nz * s * 3.0;
+      const ry = getTerrainHeight(rx, rz);
+      batch.add(new THREE.BoxGeometry(g.width + 2.4, 0.24, 3.2), M.paving, V(rx, ry + 0.08, rz), -ang);
+    }
 
     for (const side of [-1, 1]) {
       const px = g.x + ux * side * (g.width / 2 + 1.0);
@@ -416,7 +423,7 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
       const py = getTerrainHeight(px, pz);
       if (isMain) {
         // Paired cylindrical light-grey granite columns on a deeply rooted stone plinth (Kakao Roadview 정문)
-        batch.add(new THREE.BoxGeometry(2.5, 2.2, 2.3), M.graniteDark, V(px, py - 0.15, pz), -ang);
+        batch.add(new THREE.BoxGeometry(2.5, 2.8, 2.3), M.graniteDark, V(px, py - 0.45, pz), -ang);
         for (const colOff of [-0.55, 0.55]) {
           batch.add(
             new THREE.CylinderGeometry(0.42, 0.48, 5.2, 14),
@@ -446,7 +453,7 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
       g.label,
       g.sub,
       isMain
-        ? { bg: '#ded9ce', fg: '#1e293b', subFg: '#475569', accent: '#7a1f2b' }
+        ? { bg: '#2b1d24', fg: '#ffffff', subFg: '#fde68a', accent: '#fbbf24' }
         : { bg: '#7a1f2b', fg: '#ffffff', subFg: '#fde68a', accent: '#fbbf24' }
     );
     for (const s of [1, -1]) {
@@ -456,14 +463,15 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
       worldGroup.add(sign);
     }
 
-    // Security booth positioned cleanly outside the right gate column (zero overlap)
-    const bx = g.x + ux * (g.width / 2 + 4.6);
-    const bz = g.z + uz * (g.width / 2 + 4.6);
+    // Security booth on a solid paved granite base cleanly outside the right gate column
+    const bx = g.x + ux * (g.width / 2 + 4.8);
+    const bz = g.z + uz * (g.width / 2 + 4.8);
     const by = getTerrainHeight(bx, bz);
-    batch.add(new THREE.BoxGeometry(2.6, 3.6, 2.6), M.granite, V(bx, by + 0.8, bz), -ang);
-    batch.add(new THREE.BoxGeometry(2.4, 0.9, 2.7), M.glass, V(bx, by + 1.75, bz), -ang);
-    batch.add(new THREE.BoxGeometry(3.0, 0.25, 3.0), M.frame, V(bx, by + 2.75, bz), -ang);
-    extraCovers.push({ x: bx, z: bz, topY: by + 2.7, minX: bx - 1.4, maxX: bx + 1.4, minZ: bz - 1.4, maxZ: bz + 1.4 });
+    batch.add(new THREE.BoxGeometry(3.4, 2.4, 3.4), M.paving, V(bx, by - 1.12, bz), -ang);
+    batch.add(new THREE.BoxGeometry(2.6, 2.7, 2.6), M.granite, V(bx, by + 1.35, bz), -ang);
+    batch.add(new THREE.BoxGeometry(2.4, 0.9, 2.7), M.glass, V(bx, by + 1.8, bz), -ang);
+    batch.add(new THREE.BoxGeometry(3.0, 0.25, 3.0), M.frame, V(bx, by + 2.8, bz), -ang);
+    extraCovers.push({ x: bx, z: bz, topY: by + 2.8, minX: bx - 1.4, maxX: bx + 1.4, minZ: bz - 1.4, maxZ: bz + 1.4 });
   }
 
   /* ------------------------------ building entrances (OSM) ------------------------------ */

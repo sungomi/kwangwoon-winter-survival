@@ -120,7 +120,7 @@ kbd {
   position: absolute;
   top: 14px;
   left: 50%;
-  width: 460px;
+  width: min(360px, 38vw);
   height: 34px;
   transform: translateX(-50%);
   overflow: hidden;
@@ -538,9 +538,9 @@ kbd {
 .vitals {
   position: absolute;
   bottom: 18px;
-  left: 50%;
+  left: clamp(210px, 39%, 50%);
   transform: translateX(-50%);
-  width: 420px;
+  width: min(360px, 34vw);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -732,7 +732,7 @@ kbd {
 }
 .tac-btn.corner {
   position: fixed;
-  top: 16px;
+  top: 66px;
   right: 16px;
   z-index: 40;
 }
