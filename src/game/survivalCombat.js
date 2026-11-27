@@ -988,6 +988,9 @@ export function createSurvivalCombatSystem(scene, world, collision, playArea, ca
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
       p.age += dt;
+      const prevX = p.mesh.position.x;
+      const prevY = p.mesh.position.y;
+      const prevZ = p.mesh.position.z;
       p.vel.y -= p.spec.gravity * dt;
       p.mesh.position.addScaledVector(p.vel, dt);
       if (p.spec.bolt) p.mesh.lookAt(p.mesh.position.clone().add(p.vel));
@@ -995,6 +998,11 @@ export function createSurvivalCombatSystem(scene, world, collision, playArea, ca
       const groundY = getTerrainHeight(pos.x, pos.z);
 
       if (p.spec.fuse) {
+        if (collision.buildingAt3D(pos.x, pos.y, pos.z, 0.25)) {
+          pos.set(prevX, prevY, prevZ);
+          p.vel.x *= -0.4;
+          p.vel.z *= -0.4;
+        }
         if (pos.y <= groundY + 0.2) {
           pos.y = groundY + 0.2;
           p.vel.y *= -0.35;
@@ -1014,7 +1022,7 @@ export function createSurvivalCombatSystem(scene, world, collision, playArea, ca
         p.bounces++;
       }
 
-      let hit = collision.projectileHit(pos.x, pos.y, pos.z, groundY);
+      let hit = collision.projectileHit(pos.x, pos.y, pos.z, groundY, prevX, prevY, prevZ);
       if (hit) spawnEffect(pos.x, pos.y, pos.z, '#ffffff', 1.0, 0.18);
       const owner = p.owner || {};
       const dmg = p.spec.damage;

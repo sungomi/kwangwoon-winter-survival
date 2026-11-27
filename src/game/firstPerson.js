@@ -243,18 +243,33 @@ export function createFirstPersonController(camera, domElement, collision, scene
         chute.position.set(pos.x, pos.y - 1.2, pos.z);
         chute.rotation.y = yaw;
       }
-      pos.x += airVel.x * dt;
-      pos.z += airVel.z * dt;
-      pos.y += velY * dt;
+      const nextX = pos.x + airVel.x * dt;
+      const nextZ = pos.z + airVel.z * dt;
+      const nextY = pos.y + velY * dt;
+      const feetY = nextY - STAND_EYE_HEIGHT;
+      // Prevent gliding sideways into building walls while airborne
+      if (!collision.buildingAt3D(nextX, feetY, nextZ)) {
+        pos.x = nextX;
+        pos.z = nextZ;
+      } else {
+        if (!collision.buildingAt3D(nextX, feetY, pos.z)) pos.x = nextX;
+        else if (!collision.buildingAt3D(pos.x, feetY, nextZ)) pos.z = nextZ;
+        airVel.x *= 0.4;
+        airVel.z *= 0.4;
+      }
+      pos.y = nextY;
       clampToBounds();
-      // Land on roofs too
-      const building = collision.buildingAt(pos.x, pos.z, 0.2);
+      // Land on roofs or ground safely (never inside a building)
+      const building = collision.buildingAt(pos.x, pos.z, 0.4);
       const roofY = building ? building.baseY + building.height : -Infinity;
       const floor = Math.max(groundY, roofY) + STAND_EYE_HEIGHT;
       if (pos.y <= floor) {
         if (building) placeOnGround(pos.x, pos.z);
         else {
-          pos.y = floor;
+          const [rx, rz] = collision.resolvePosition(pos.x, pos.z);
+          pos.x = rx;
+          pos.z = rz;
+          pos.y = getTerrainHeight(rx, rz) + STAND_EYE_HEIGHT;
           velY = 0;
           grounded = true;
           setPhase('ground');
@@ -287,8 +302,16 @@ export function createFirstPersonController(camera, domElement, collision, scene
       // feet height decides whether a ledge can be stepped onto (jumping lets you climb low walls)
       const feet = pos.y - currentEyeHeight;
       const canStep = (nx, nz) => getTerrainHeight(nx, nz) - feet <= MAX_STEP_UP;
-      if (!collision.isBlocked(pos.x + stepX, pos.z) && canStep(pos.x + stepX, pos.z)) pos.x += stepX;
-      if (!collision.isBlocked(pos.x, pos.z + stepZ) && canStep(pos.x, pos.z + stepZ)) pos.z += stepZ;
+      const [nx, nz] = collision.moveCircle(pos.x, pos.z, stepX, stepZ, undefined, canStep);
+      pos.x = nx;
+      pos.z = nz;
+    }
+
+    // Safety guard: never allow the player to remain inside a building footprint
+    if (collision.buildingAt(pos.x, pos.z)) {
+      const [rx, rz] = collision.resolvePosition(pos.x, pos.z);
+      pos.x = rx;
+      pos.z = rz;
     }
 
     const floorY = getTerrainHeight(pos.x, pos.z) + currentEyeHeight;

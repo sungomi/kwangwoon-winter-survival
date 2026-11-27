@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { createBuildingFacadeTexture, createPitchTexture } from './textures.js';
-import { getTerrainHeight, getFootprintMinHeight } from './terrain.js';
+import { getTerrainHeight, getFootprintMinHeight, registerBuildingPads } from './terrain.js';
 import { createStaticBatcher } from '../utils/mergeByMaterial.js';
 import { buildCampusFeatures } from './campusFeatures3d.js';
 import { PLAZA } from '../data/campusFeatures.js';
@@ -88,6 +88,9 @@ function computePolygonBounds(polygon) {
 }
 
 export function buildCampusWorld(scene, mapData, labelsLayer) {
+  // Grade level building pads into the terrain heightfield BEFORE building any geometry
+  registerBuildingPads(mapData.buildings);
+
   const worldGroup = new THREE.Group();
   scene.add(worldGroup);
   // Everything static is queued here and merged into one mesh per material at the end
@@ -104,30 +107,40 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     gPos.setY(i, getTerrainHeight(vx, vz));
   }
   groundGeo.computeVertexNormals();
-  const groundMat = new THREE.MeshLambertMaterial({ color: '#d8e4f0' });
+  const groundMat = new THREE.MeshStandardMaterial({ color: '#d8e4f0', roughness: 0.92, metalness: 0.02 });
   const ground = new THREE.Mesh(groundGeo, groundMat);
   ground.receiveShadow = true;
   worldGroup.add(ground);
 
-  // Snowy grass & plazas (placed on terrain)
+  // Snowy grass & plazas (grid-tessellated so terrain hills never poke through)
+  const grassMat = new THREE.MeshLambertMaterial({ color: '#9ec2ad', side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
   for (const g of mapData.grasses || []) {
     if (g.polygon.length < 3) continue;
-    const shape = createShapeFromPolygon(g.polygon);
-    const geo = new THREE.ShapeGeometry(shape);
-    geo.rotateX(-Math.PI / 2);
-    const gp = geo.attributes.position;
-    for (let i = 0; i < gp.count; i++) {
-      gp.setY(i, getTerrainHeight(gp.getX(i), gp.getZ(i)) + 0.08);
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const [x, z] of g.polygon) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
     }
+    const cell = 4;
+    const verts = [];
+    for (let x = minX; x < maxX; x += cell) {
+      for (let z = minZ; z < maxZ; z += cell) {
+        if (!pointInPoly(x + cell * 0.5, z + cell * 0.5, g.polygon)) continue;
+        const q = [
+          [x, z], [x + cell, z], [x + cell, z + cell], [x, z + cell],
+        ].map(([px, pz]) => [px, getTerrainHeight(px, pz) + 0.09, pz]);
+        verts.push(...q[0], ...q[2], ...q[1], ...q[0], ...q[3], ...q[2]);
+      }
+    }
+    if (!verts.length) continue;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     geo.computeVertexNormals();
-    const mat = new THREE.MeshLambertMaterial({ color: '#a8cab8' });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.receiveShadow = true;
-    worldGroup.add(mesh);
+    batch.add(geo, grassMat, ORIGIN);
   }
 
-  // Winter roads hugging the hill terrain
-  const roadMat = new THREE.MeshLambertMaterial({ color: '#353e4a', side: THREE.DoubleSide });
+  // Winter roads hugging the hill terrain (finer 4m subdivision + polygonOffset to avoid clipping)
+  const roadMat = new THREE.MeshLambertMaterial({ color: '#394350', side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   for (const road of mapData.roads || []) {
     const pts = road.points;
     for (let i = 0; i < pts.length - 1; i++) {
@@ -138,7 +151,7 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       const len = Math.hypot(dx, dz);
       if (len < 0.5) continue;
 
-      const subSteps = Math.max(1, Math.ceil(len / 8));
+      const subSteps = Math.max(1, Math.ceil(len / 4));
       const nx = (-dz / len) * (road.width * 0.5);
       const nz = (dx / len) * (road.width * 0.5);
       const verts = [];
@@ -302,12 +315,24 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   }
   for (const p of mapData.pitches || []) {
     const tex = createPitchTexture(p.type);
-    const geo = new THREE.PlaneGeometry(p.width, p.depth);
-    const mat = new THREE.MeshLambertMaterial({ map: tex });
+    const segX = Math.max(4, Math.ceil(p.width / 4));
+    const segZ = Math.max(4, Math.ceil(p.depth / 4));
+    const geo = new THREE.PlaneGeometry(p.width, p.depth, segX, segZ);
+    geo.rotateX(-Math.PI / 2);
+    const rot = p.rotation || 0;
+    const cs = Math.cos(rot);
+    const sn = Math.sin(rot);
+    const posAttr = geo.attributes.position;
+    for (let i = 0; i < posAttr.count; i++) {
+      const lx = posAttr.getX(i);
+      const lz = posAttr.getZ(i);
+      const wx = p.center[0] + lx * cs - lz * sn;
+      const wz = p.center[1] + lx * sn + lz * cs;
+      posAttr.setXYZ(i, wx, getTerrainHeight(wx, wz) + 0.16, wz);
+    }
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.rotation.z = p.rotation || 0;
-    mesh.position.set(p.center[0], getTerrainHeight(p.center[0], p.center[1]) + 0.16, p.center[1]);
     mesh.receiveShadow = true;
     worldGroup.add(mesh);
   }
@@ -502,89 +527,161 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   xmasTree.add(treeLight);
   worldGroup.add(xmasTree);
 
-  // Buildings
+  // Buildings (graded pad + stone foundation plinth + Roadview-accurate above-ground body)
   labelsLayer.innerHTML = '';
   const facadeCache = new Map();
+  const plinthMatCache = new Map();
   const buildings = [];
 
   for (const b of mapData.buildings) {
     if (!b.polygon || b.polygon.length < 3) continue;
     const bounds = computePolygonBounds(b.polygon);
-    // Foundation follows the real slope: sink to the lowest corner, roof stays `height` above the centroid
-    const groundAtCenter = getTerrainHeight(bounds.cx, bounds.cz);
-    const baseY = getFootprintMinHeight(b.polygon) - 1.2;
-    const totalHeight = groundAtCenter - baseY + b.height;
+    // Leveled pad height (guaranteed by registerBuildingPads so no floor is buried on slopes)
+    const padY = b.padY !== undefined ? b.padY : getTerrainHeight(bounds.cx, bounds.cz);
+    const minFootY = getFootprintMinHeight(b.polygon);
+    const plinthBottom = Math.min(minFootY, padY) - 2.2;
+    const plinthHeight = Math.max(0.4, padY - plinthBottom + 0.12);
+    const bodyHeight = b.height;
 
     const shape = createShapeFromPolygon(b.polygon);
+
+    // 1) Above-ground building body (starts cleanly at padY, 100% of floors/windows above ground)
     const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: totalHeight,
+      depth: bodyHeight,
       bevelEnabled: false,
       UVGenerator: THREE.ExtrudeGeometry.WorldUVGenerator,
     });
     geo.rotateX(-Math.PI / 2);
 
-    // Scale UVs on side walls for crisp repeating windows
+    // Scale UVs on side walls so 4 texture floors align with ~14m real building height (~3.5m/floor)
     const uv = geo.attributes.uv;
     for (let i = 0; i < uv.count; i++) {
-      uv.setXY(i, uv.getX(i) * 0.08, uv.getY(i) * 0.08);
+      uv.setXY(i, uv.getX(i) * 0.072, uv.getY(i) * 0.072);
     }
 
     const texKey = `${b.facadeType || 'ribbon'}_${b.wallColor}`;
     if (!facadeCache.has(texKey)) {
       facadeCache.set(texKey, createBuildingFacadeTexture(b.facadeType || 'ribbon', b.wallColor));
     }
-    // Snowy winter roofs on buildings
-    const winterRoofColor = b.roofStyle === 'terrace_green' ? '#b8dec2' : '#edf3f9';
-    const roofMat = new THREE.MeshLambertMaterial({ color: winterRoofColor });
-    const wallMat = new THREE.MeshLambertMaterial({ map: facadeCache.get(texKey) });
+
+    // Preserve real-world roof colors (Roadview/Skyview) with subtle winter frost tint
+    const baseRoofCol = new THREE.Color(b.roofColor || '#c8cdd2');
+    if (b.roofStyle !== 'hwado_pediment' && b.roofStyle !== 'memorial_80' && b.roofStyle !== 'rooftop_turf') {
+      baseRoofCol.lerp(new THREE.Color('#eef4fa'), 0.35);
+    }
+    const roofMat = new THREE.MeshStandardMaterial({ color: baseRoofCol, roughness: 0.88, metalness: 0.04 });
+    const wallMat = new THREE.MeshStandardMaterial({
+      map: facadeCache.get(texKey),
+      roughness: b.facadeType === 'curtainwall' || b.facadeType === 'saebit_modern' || b.facadeType === 'memorial_80' ? 0.52 : 0.84,
+      metalness: b.facadeType === 'curtainwall' || b.facadeType === 'saebit_modern' ? 0.16 : 0.04,
+    });
 
     const mesh = new THREE.Mesh(geo, [roofMat, wallMat]);
-    mesh.position.y = baseY;
+    mesh.position.y = padY;
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
-    const edgesGeo = new THREE.EdgesGeometry(geo, 22);
+    // 2) Foundation plinth / retaining base (기단부) extending below downhill terrain
+    const plinthColor = b.plinthColor || '#84888e';
+    if (!plinthMatCache.has(plinthColor)) {
+      plinthMatCache.set(plinthColor, new THREE.MeshStandardMaterial({ color: plinthColor, roughness: 0.92, metalness: 0.02 }));
+    }
+    const plinthGeo = new THREE.ExtrudeGeometry(shape, {
+      depth: plinthHeight,
+      bevelEnabled: false,
+    });
+    plinthGeo.rotateX(-Math.PI / 2);
+    const plinthMesh = new THREE.Mesh(plinthGeo, plinthMatCache.get(plinthColor));
+    plinthMesh.position.y = -plinthHeight + 0.12;
+    plinthMesh.castShadow = true;
+    plinthMesh.receiveShadow = true;
+    mesh.add(plinthMesh);
+
+    const edgesGeo = new THREE.EdgesGeometry(geo, 24);
     const edges = new THREE.LineSegments(edgesGeo, edgeMat);
     mesh.add(edges);
 
-    // Add realistic rooftop details by building style
+    // Add realistic Roadview/Skyview rooftop details by building style
     const spanX = bounds.maxX - bounds.minX;
     const spanZ = bounds.maxZ - bounds.minZ;
-    if (b.roofStyle === 'clocktower') {
-      // 화도관 central clocktower / pediment accent
-      const towerGeo = new THREE.BoxGeometry(8, 5.5, 8);
-      const towerMat = new THREE.MeshLambertMaterial({ color: '#dfd7ca' });
-      const tower = new THREE.Mesh(towerGeo, towerMat);
-      tower.position.set(bounds.cx, totalHeight + 2.75, bounds.cz);
-      tower.castShadow = true;
-      tower.add(new THREE.LineSegments(new THREE.EdgesGeometry(towerGeo), edgeMat));
-      mesh.add(tower);
+    if (b.roofStyle === 'hwado_pediment') {
+      // 화도관: terracotta-brown pitched/hipped roof cap + central grey mechanical penthouse
+      const hipW = Math.max(10, spanX * 0.72);
+      const hipD = Math.max(8, spanZ * 0.42);
+      const hipGeo = new THREE.CylinderGeometry(Math.min(hipW, hipD) * 0.35, Math.min(hipW, hipD) * 0.62, 3.2, 4);
+      hipGeo.rotateY(Math.PI / 4);
+      hipGeo.scale(hipW / Math.min(hipW, hipD), 1, hipD / Math.min(hipW, hipD));
+      const hipMat = new THREE.MeshStandardMaterial({ color: '#723c31', roughness: 0.82 });
+      const hipRoof = new THREE.Mesh(hipGeo, hipMat);
+      hipRoof.position.set(bounds.cx, bodyHeight + 1.6, bounds.cz);
+      hipRoof.castShadow = true;
+      mesh.add(hipRoof);
 
-      const capGeo = new THREE.BoxGeometry(9, 1.2, 9);
-      const capMat = new THREE.MeshLambertMaterial({ color: '#7a352b' });
-      const cap = new THREE.Mesh(capGeo, capMat);
-      cap.position.set(bounds.cx, totalHeight + 6.1, bounds.cz);
-      cap.add(new THREE.LineSegments(new THREE.EdgesGeometry(capGeo), edgeMat));
-      mesh.add(cap);
-    } else if (b.roofStyle === 'terrace_green') {
-      // 80주년 기념관 compact centered glass skylight pavilion on its green roof (never overhangs diagonal footprint)
-      const skyW = Math.min(14, spanX * 0.28);
-      const skyD = Math.min(14, spanZ * 0.28);
-      const skyGeo = new THREE.BoxGeometry(skyW, 2.2, skyD);
-      const skyMat = new THREE.MeshLambertMaterial({ color: '#5f94b8' });
+      const pentGeo = new THREE.BoxGeometry(7.5, 2.4, 6.5);
+      const pentMat = new THREE.MeshStandardMaterial({ color: '#a5aab0', roughness: 0.85 });
+      const pent = new THREE.Mesh(pentGeo, pentMat);
+      pent.position.set(bounds.cx, bodyHeight + 3.8, bounds.cz);
+      pent.castShadow = true;
+      mesh.add(pent);
+    } else if (b.roofStyle === 'memorial_80') {
+      // 80주년 기념관: dark charcoal-grey stepped roof parapet & skylight band
+      const skyW = Math.min(14, spanX * 0.3);
+      const skyD = Math.min(10, spanZ * 0.26);
+      const skyGeo = new THREE.BoxGeometry(skyW, 1.4, skyD);
+      const skyMat = new THREE.MeshStandardMaterial({ color: '#587d9c', roughness: 0.35, metalness: 0.2 });
       const sky = new THREE.Mesh(skyGeo, skyMat);
-      sky.position.set(bounds.cx, totalHeight + 1.1, bounds.cz);
+      sky.position.set(bounds.cx, bodyHeight + 0.7, bounds.cz);
       sky.castShadow = true;
-      sky.add(new THREE.LineSegments(new THREE.EdgesGeometry(skyGeo), edgeMat));
       mesh.add(sky);
+    } else if (b.roofStyle === 'solar_roof') {
+      // 새빛관: angled rooftop solar arrays
+      const solarMat = new THREE.MeshStandardMaterial({ color: '#1e3a5f', roughness: 0.3, metalness: 0.35 });
+      const rows = 3;
+      const cols = 4;
+      const pW = Math.min(4.2, (spanX * 0.55) / cols);
+      const pD = Math.min(2.6, (spanZ * 0.55) / rows);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const panel = new THREE.Mesh(new THREE.BoxGeometry(pW * 0.85, 0.12, pD * 0.78), solarMat);
+          panel.position.set(
+            bounds.cx + (c - (cols - 1) / 2) * pW,
+            bodyHeight + 0.85,
+            bounds.cz + (r - (rows - 1) / 2) * pD
+          );
+          panel.rotation.x = -0.32;
+          mesh.add(panel);
+        }
+      }
+    } else if (b.roofStyle === 'green_terrace') {
+      // 참빛관: planted green rooftop terrace section
+      const tW = Math.min(14, spanX * 0.45);
+      const tD = Math.min(10, spanZ * 0.38);
+      const terrace = new THREE.Mesh(
+        new THREE.BoxGeometry(tW, 0.35, tD),
+        new THREE.MeshStandardMaterial({ color: '#5f8f6b', roughness: 0.9 })
+      );
+      terrace.position.set(bounds.cx, bodyHeight + 0.18, bounds.cz);
+      mesh.add(terrace);
+    } else if (b.roofStyle === 'rooftop_turf') {
+      // 동해문화예술관: bright green rooftop sports turf field
+      const courtTex = createPitchTexture('soccer');
+      const cW = Math.min(24, spanX * 0.62);
+      const cD = Math.min(15, spanZ * 0.55);
+      const court = new THREE.Mesh(
+        new THREE.PlaneGeometry(cW, cD),
+        new THREE.MeshLambertMaterial({ map: courtTex })
+      );
+      court.rotation.x = -Math.PI / 2;
+      court.position.set(bounds.cx, bodyHeight + 0.12, bounds.cz);
+      mesh.add(court);
     } else if (spanX > 10 && spanZ > 10) {
       const pentW = Math.min(8, spanX * 0.25);
       const pentD = Math.min(7, spanZ * 0.25);
-      const pentH = b.isCampus ? 2.6 : 2.0;
+      const pentH = b.isCampus ? 2.4 : 1.9;
       const pentGeo = new THREE.BoxGeometry(pentW, pentH, pentD);
-      const pentMat = new THREE.MeshLambertMaterial({ color: '#8e959c' });
+      const pentMat = new THREE.MeshStandardMaterial({ color: '#8e959c', roughness: 0.85 });
       const pentMesh = new THREE.Mesh(pentGeo, pentMat);
-      pentMesh.position.set(bounds.cx, totalHeight + pentH / 2, bounds.cz);
+      pentMesh.position.set(bounds.cx, bodyHeight + pentH / 2, bounds.cz);
       pentMesh.castShadow = true;
       pentMesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(pentGeo), edgeMat));
       mesh.add(pentMesh);
@@ -601,23 +698,21 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
           const t = s / steps;
           const bx = x1 + (x2 - x1) * t;
           const bz = z1 + (z2 - z1) * t;
-          // batched into 3 meshes (one per colour); twinkle is done on the shared materials
-          batch.add(garlandBulbGeo, garlandMats[(i + s) % garlandMats.length], new THREE.Vector3(bx, baseY + totalHeight + 0.45, bz));
+          batch.add(garlandBulbGeo, garlandMats[(i + s) % garlandMats.length], new THREE.Vector3(bx, padY + bodyHeight + 0.45, bz));
         }
       }
 
-      // Main plaza buildings get a large glowing Christmas wreath + star above!
       if (['비마관', '화도관', '80주년 기념관', '복지관', '다산재'].includes(b.name)) {
         const wreath = new THREE.Mesh(
           new THREE.TorusGeometry(2.6, 0.55, 8, 18),
           new THREE.MeshLambertMaterial({ color: '#15803d' })
         );
-        wreath.position.set(bounds.cx, totalHeight + 3.2, bounds.cz);
+        wreath.position.set(bounds.cx, bodyHeight + 3.2, bounds.cz);
         const ribbon = new THREE.Mesh(
           new THREE.BoxGeometry(1.4, 1.4, 1.4),
           new THREE.MeshBasicMaterial({ color: '#ef4444' })
         );
-        ribbon.position.set(bounds.cx, totalHeight + 0.8, bounds.cz);
+        ribbon.position.set(bounds.cx, bodyHeight + 0.8, bounds.cz);
         mesh.add(wreath, ribbon);
         twinkleLights.push({ mesh: ribbon, phase: 0.5 });
       }
@@ -637,8 +732,9 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       id: b.id,
       name: b.name,
       isCampus: b.isCampus,
-      height: totalHeight,
-      baseY,
+      height: bodyHeight,
+      baseY: padY,
+      plinthBottom,
       polygon: b.polygon,
       bounds,
       mesh,

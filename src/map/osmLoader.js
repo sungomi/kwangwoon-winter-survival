@@ -4,26 +4,26 @@ import { CAMPUS_OUTLINES, MAPPED_BARRIERS, WOODS } from '../data/campusBoundary.
 
 const METERS_PER_LAT = 111320;
 
-// Real-world architectural profiles for Kwangwoon University buildings
+// Real-world architectural profiles for Kwangwoon University buildings (verified via Roadview / Street View)
 const KWANGWOON_PROFILES = {
-  화도관: { facadeType: 'brick_clean', wallColor: '#a84a3c', roofColor: '#c4bfb7', height: 22, roofStyle: 'clocktower' },
-  비마관: { facadeType: 'ribbon', wallColor: '#d2ccc0', roofColor: '#c9ccd0', height: 32 },
-  새빛관: { facadeType: 'saebit_modern', wallColor: '#e6ebf0', roofColor: '#c7cfd6', height: 33 },
-  참빛관: { facadeType: 'curtainwall', wallColor: '#487696', roofColor: '#a2abb3', height: 36 },
-  연구관: { facadeType: 'curtainwall', wallColor: '#567c94', roofColor: '#adb5bd', height: 34 },
-  '80주년 기념관': { facadeType: 'memorial_80', wallColor: '#ece9e1', roofColor: '#76a65b', height: 15, roofStyle: 'terrace_green' },
-  복지관: { facadeType: 'brick_clean', wallColor: '#a35144', roofColor: '#aeb3b8', height: 18 },
-  옥의관: { facadeType: 'ribbon', wallColor: '#cbc4b8', roofColor: '#b5b9be', height: 30 },
-  한울관: { facadeType: 'stone_modern', wallColor: '#dcd6ca', roofColor: '#bfc4c9', height: 25 },
-  다산재: { facadeType: 'brick_clean', wallColor: '#94483c', roofColor: '#9da3a8', height: 16 },
-  한천재: { facadeType: 'brick_clean', wallColor: '#9e5144', roofColor: '#a8adb2', height: 19 },
-  연촌재: { facadeType: 'brick_clean', wallColor: '#a35b4c', roofColor: '#b0b4b9', height: 12 },
-  승리관: { facadeType: 'stone_modern', wallColor: '#d6d0c5', roofColor: '#5c859e', height: 15 },
-  '광운대학교 동해문화예술관 대극장': { facadeType: 'stone_modern', wallColor: '#ded8cc', roofColor: '#56687a', height: 22 },
-  '광운대학교 아이스링크장': { facadeType: 'arena', wallColor: '#cfd6de', roofColor: '#4a7aa8', height: 16 },
-  '빛솔재 A동': { facadeType: 'apartment', wallColor: '#e2dcd2', roofColor: '#b8bec4', height: 24 },
-  '빛솔재 B동': { facadeType: 'apartment', wallColor: '#e2dcd2', roofColor: '#b8bec4', height: 24 },
-  '인터내셔널 하우스': { facadeType: 'brick_clean', wallColor: '#a85a4a', roofColor: '#b5b9be', height: 14 },
+  화도관: { facadeType: 'hwado_granite', wallColor: '#dcd7cd', roofColor: '#723c31', plinthColor: '#84888e', height: 22, roofStyle: 'hwado_pediment' },
+  비마관: { facadeType: 'bima_ribbon', wallColor: '#d9d6cf', roofColor: '#c4c9ce', plinthColor: '#73443c', height: 26 },
+  새빛관: { facadeType: 'saebit_modern', wallColor: '#e7ebf0', roofColor: '#c9cfd6', plinthColor: '#8d9298', height: 33, roofStyle: 'solar_roof' },
+  참빛관: { facadeType: 'chambit_stone', wallColor: '#d6c4b8', roofColor: '#bfc3c8', plinthColor: '#989088', height: 35, roofStyle: 'green_terrace' },
+  연구관: { facadeType: 'yeongu_mixed', wallColor: '#d2c2b0', roofColor: '#adb5bc', plinthColor: '#7e3f35', height: 34 },
+  '80주년 기념관': { facadeType: 'memorial_80', wallColor: '#d8dce2', roofColor: '#434a54', plinthColor: '#565e68', height: 15, roofStyle: 'memorial_80' },
+  복지관: { facadeType: 'bokji_brick', wallColor: '#964438', roofColor: '#5c4b46', plinthColor: '#d0c6b5', height: 18 },
+  옥의관: { facadeType: 'ogeui_concrete', wallColor: '#d9d8d3', roofColor: '#b8bdc2', plinthColor: '#7c7e80', height: 30 },
+  한울관: { facadeType: 'stone_modern', wallColor: '#dcd6ca', roofColor: '#bfc4c9', plinthColor: '#8a8c90', height: 25 },
+  다산재: { facadeType: 'brick_clean', wallColor: '#94483c', roofColor: '#9da3a8', plinthColor: '#82858a', height: 16 },
+  한천재: { facadeType: 'brick_clean', wallColor: '#9e5144', roofColor: '#a8adb2', plinthColor: '#82858a', height: 19 },
+  연촌재: { facadeType: 'brick_clean', wallColor: '#a35b4c', roofColor: '#b0b4b9', plinthColor: '#82858a', height: 12 },
+  승리관: { facadeType: 'stone_modern', wallColor: '#d6d0c5', roofColor: '#5c859e', plinthColor: '#85898e', height: 15 },
+  '광운대학교 동해문화예술관 대극장': { facadeType: 'donghae_brick', wallColor: '#a65040', roofColor: '#3d8b55', plinthColor: '#7f8388', height: 22, roofStyle: 'rooftop_turf' },
+  '광운대학교 아이스링크장': { facadeType: 'arena', wallColor: '#cfd6de', roofColor: '#4a7aa8', plinthColor: '#7f858d', height: 16 },
+  '빛솔재 A동': { facadeType: 'apartment', wallColor: '#e2dcd2', roofColor: '#b8bec4', plinthColor: '#8b8e93', height: 24 },
+  '빛솔재 B동': { facadeType: 'apartment', wallColor: '#e2dcd2', roofColor: '#b8bec4', plinthColor: '#8b8e93', height: 24 },
+  '인터내셔널 하우스': { facadeType: 'brick_clean', wallColor: '#a85a4a', roofColor: '#b5b9be', plinthColor: '#84888d', height: 14 },
 };
 
 function estimateHeight(tags = {}, profile = null) {
@@ -146,6 +146,7 @@ function loadGeoJson(geojson) {
           height,
           roofColor,
           wallColor,
+          plinthColor: profile?.plinthColor || '#84888e',
           polygon: pts,
         });
         bIdx++;

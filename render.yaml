@@ -3,5 +3,7 @@ services:
     name: kwangwoon-winter-survival
     runtime: node
     plan: free
+    branch: main
+    autoDeploy: true
     buildCommand: npm install --include=dev && npm run build
     startCommand: node server.js

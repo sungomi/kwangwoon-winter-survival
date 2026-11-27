@@ -205,8 +205,6 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
   const library = buildings.find((b) => b.name === LIBRARY.name);
   if (library) {
     const roofY = library.baseY + library.height;
-    // remove the old generic rooftop props, replace with a real-looking solar array (항공사진 기준)
-    library.mesh.children.filter((c) => c.isMesh && c.geometry.type === 'BoxGeometry').forEach((c) => library.mesh.remove(c));
     const poly = library.polygon;
     const { minX, maxX, minZ, maxZ } = library.bounds;
     const inside = (px, pz) => {
@@ -218,34 +216,73 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
       }
       return ins;
     };
+    // Solar array along the west half of the charcoal roof (matching Skyview)
     const panelGeo = new THREE.BoxGeometry(1.9, 0.08, 1.1);
     const tilt = new THREE.Euler(-0.32, 0, 0);
-    for (let px = minX + 2; px < maxX - 2; px += 2.2) {
-      for (let pz = minZ + 2; pz < maxZ - 2; pz += 1.9) {
-        // keep a margin from the roof edge (check panel corners)
+    const westSplit = minX + (maxX - minX) * 0.52;
+    for (let px = minX + 2.5; px < westSplit; px += 2.4) {
+      for (let pz = minZ + 2.5; pz < maxZ - 2.5; pz += 2.1) {
         if (!inside(px - 1.2, pz - 1) || !inside(px + 1.2, pz + 1) || !inside(px - 1.2, pz + 1) || !inside(px + 1.2, pz - 1)) continue;
         batch.add(panelGeo, M.solar, V(px, roofY + 0.55, pz), 0, null, tilt);
         batch.add(new THREE.BoxGeometry(0.08, 0.5, 0.08), M.solarFrame, V(px, roofY + 0.25, pz + 0.3));
       }
     }
-    // Entrance pavilion on the facade facing the plaza
+    // Entrance pavilion on the facade facing 광운스퀘어 (cantilevered fascia + gridded glass + white column)
     const edge = nearestEdge(poly, PLAZA.x, PLAZA.z);
     if (edge) {
       const { mx, mz, nx, nz, ang } = edge;
-      const gy = getTerrainHeight(mx + nx * 3, mz + nz * 3);
+      const gy = Math.max(library.baseY, getTerrainHeight(mx + nx * 2.5, mz + nz * 2.5));
       const ex = mx + nx * 2.2;
       const ez = mz + nz * 2.2;
+      const tx = Math.cos(ang);
+      const tz = Math.sin(ang);
       batch.add(new THREE.BoxGeometry(16, 5.2, 4.4), M.glass, V(ex, gy + 2.6, ez), -ang);
       for (let i = -4; i <= 4; i++) {
-        batch.add(new THREE.BoxGeometry(0.12, 5.2, 0.12), M.frame, V(ex + Math.cos(ang) * i * 2 + nx * 2.2, gy + 2.6, ez + Math.sin(ang) * i * 2 + nz * 2.2));
+        batch.add(new THREE.BoxGeometry(0.14, 5.2, 0.14), M.frame, V(ex + tx * i * 2 + nx * 2.2, gy + 2.6, ez + tz * i * 2 + nz * 2.2));
       }
-      batch.add(new THREE.BoxGeometry(18, 0.35, 6.5), M.frame, V(ex + nx * 1.0, gy + 5.4, ez + nz * 1.0), -ang); // canopy
-      batch.add(new THREE.BoxGeometry(18, 0.08, 6.5), M.snow, V(ex + nx * 1.0, gy + 5.62, ez + nz * 1.0), -ang);
-      const sign = signMesh(12, 2, signTexture('중앙도서관', 'KWANGWOON UNIVERSITY CENTRAL LIBRARY · 80주년기념관'));
-      sign.position.set(ex + nx * 4.3, gy + 6.6, ez + nz * 4.3);
+      // Signature white cylindrical support column & cantilevered fascia
+      batch.add(new THREE.CylinderGeometry(0.45, 0.45, 5.4, 14), M.booth, V(ex + tx * 8.4 + nx * 2.6, gy + 2.7, ez + tz * 8.4 + nz * 2.6));
+      batch.add(new THREE.BoxGeometry(18.5, 0.75, 6.6), M.granite, V(ex + nx * 1.1, gy + 5.6, ez + nz * 1.1), -ang);
+      batch.add(new THREE.BoxGeometry(18.5, 0.08, 6.6), M.snow, V(ex + nx * 1.1, gy + 6.02, ez + nz * 1.1), -ang);
+      const sign = signMesh(13.5, 1.9, signTexture('KWANGWOON UNIVERSITY', '80주년기념관 · 중앙도서관 CENTRAL LIBRARY', { bg: '#27313d', accent: '#cbd5e1' }));
+      sign.position.set(ex + nx * 4.45, gy + 6.9, ez + nz * 4.45);
       sign.rotation.y = Math.atan2(nx, nz);
       worldGroup.add(sign);
-      extraWalls.push({ type: 'invisible', a: [ex - Math.cos(ang) * 8 + nx * 2.2, ez - Math.sin(ang) * 8 + nz * 2.2], b: [ex + Math.cos(ang) * 8 + nx * 2.2, ez + Math.sin(ang) * 8 + nz * 2.2] });
+      // Full 3-sided collision for the entrance pavilion so players cannot walk through its sides
+      const fl = [ex - tx * 8.1 + nx * 2.3, ez - tz * 8.1 + nz * 2.3];
+      const fr = [ex + tx * 8.1 + nx * 2.3, ez + tz * 8.1 + nz * 2.3];
+      const bl = [ex - tx * 8.1 - nx * 2.1, ez - tz * 8.1 - nz * 2.1];
+      const br = [ex + tx * 8.1 - nx * 2.1, ez + tz * 8.1 - nz * 2.1];
+      extraWalls.push({ type: 'invisible', a: fl, b: fr });
+      extraWalls.push({ type: 'invisible', a: bl, b: fl });
+      extraWalls.push({ type: 'invisible', a: br, b: fr });
+    }
+  }
+
+  /* ------------------------------ 화도관 (South Facade Pediment & Atrium) ------------------------------ */
+  const hwado = buildings.find((b) => b.name === '화도관');
+  if (hwado) {
+    // South-facing facade toward the central plaza/lawn
+    const edge = nearestEdge(hwado.polygon, PLAZA.x, PLAZA.z);
+    if (edge) {
+      const { mx, mz, nx, nz, ang } = edge;
+      const gy = hwado.baseY;
+      const tx = Math.cos(ang);
+      const tz = Math.sin(ang);
+      const ax = mx + nx * 0.9;
+      const az = mz + nz * 0.9;
+      const atriumH = Math.min(16, hwado.height * 0.76);
+      // 4-story recessed gridded glass curtain-wall atrium
+      batch.add(new THREE.BoxGeometry(11.5, atriumH, 1.2), M.glass, V(ax, gy + atriumH / 2, az), -ang);
+      // Tall square granite piers flanking the atrium
+      for (const s of [-6.4, -2.8, 2.8, 6.4]) {
+        batch.add(new THREE.BoxGeometry(1.1, atriumH + 1.2, 1.9), M.booth, V(ax + tx * s + nx * 0.35, gy + (atriumH + 1.2) / 2, az + tz * s + nz * 0.35), -ang);
+      }
+      // Classical granite cornice + triangular pediment atop the south atrium
+      batch.add(new THREE.BoxGeometry(15.2, 1.1, 2.4), M.booth, V(ax + nx * 0.4, gy + atriumH + 1.4, az + nz * 0.4), -ang);
+      const pedGeo = new THREE.ConeGeometry(8.2, 3.6, 3);
+      pedGeo.scale(1.05, 1, 0.24);
+      batch.add(pedGeo, M.booth, V(ax + nx * 0.4, gy + atriumH + 3.6, az + nz * 0.4), -ang);
     }
   }
 
@@ -284,36 +321,80 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
     }
   }
 
-  /* ------------------------------ gates ------------------------------ */
-  // gates are snapped onto the campus fence line (the fence is opened there in osmLoader)
+  /* ------------------------------ gates (Roadview-accurate classical granite portal) ------------------------------ */
+  const gateGreenIron = new THREE.MeshLambertMaterial({ color: '#1f3a2e' });
+  const gateCreamStone = new THREE.MeshLambertMaterial({ color: '#d4cfc4' });
   for (const g of placeGates(outlines)) {
     const ang = g.ang;
     const ux = Math.cos(ang);
     const uz = Math.sin(ang);
     const gy = getTerrainHeight(g.x, g.z);
+    const isMain = g.id === 'main';
+
     for (const side of [-1, 1]) {
-      const px = g.x + ux * side * (g.width / 2 + 0.9);
-      const pz = g.z + uz * side * (g.width / 2 + 0.9);
+      const px = g.x + ux * side * (g.width / 2 + 1.0);
+      const pz = g.z + uz * side * (g.width / 2 + 1.0);
       const py = getTerrainHeight(px, pz);
-      batch.add(new THREE.BoxGeometry(1.6, 5.6, 1.6), M.gateStone, V(px, py + 2.8, pz), -ang);
-      batch.add(new THREE.BoxGeometry(1.8, 0.3, 1.8), M.graniteDark, V(px, py + 5.75, pz), -ang);
-      batch.add(new THREE.BoxGeometry(1.7, 0.12, 1.7), M.snow, V(px, py + 5.96, pz), -ang);
-      extraCovers.push({ x: px, z: pz, topY: py + 5.6, minX: px - 0.9, maxX: px + 0.9, minZ: pz - 0.9, maxZ: pz + 0.9 });
+      if (isMain) {
+        // Paired cylindrical light-grey granite columns on a stone plinth (Kakao Roadview 정문)
+        batch.add(new THREE.BoxGeometry(2.4, 0.9, 2.2), M.graniteDark, V(px, py + 0.45, pz), -ang);
+        for (const colOff of [-0.55, 0.55]) {
+          batch.add(
+            new THREE.CylinderGeometry(0.42, 0.48, 5.2, 14),
+            gateCreamStone,
+            V(px + ux * colOff, py + 3.5, pz + uz * colOff)
+          );
+        }
+        batch.add(new THREE.BoxGeometry(2.5, 0.45, 2.2), M.granite, V(px, py + 6.2, pz), -ang);
+        // Dark-green wrought-iron folding gate leaf (swung open)
+        batch.add(
+          new THREE.BoxGeometry(1.8, 2.2, 0.12),
+          gateGreenIron,
+          V(px - ux * side * 1.4 - uz * 0.6, py + 1.3, pz - uz * side * 1.4 + ux * 0.6),
+          -ang + side * 0.35
+        );
+      } else {
+        batch.add(new THREE.BoxGeometry(1.6, 5.6, 1.6), M.gateStone, V(px, py + 2.8, pz), -ang);
+        batch.add(new THREE.BoxGeometry(1.8, 0.3, 1.8), M.graniteDark, V(px, py + 5.75, pz), -ang);
+        batch.add(new THREE.BoxGeometry(1.7, 0.12, 1.7), M.snow, V(px, py + 5.96, pz), -ang);
+      }
+      extraCovers.push({ x: px, z: pz, topY: py + 6.0, minX: px - 1.2, maxX: px + 1.2, minZ: pz - 1.2, maxZ: pz + 1.2 });
     }
-    // overhead beam with the university name
-    batch.add(new THREE.BoxGeometry(g.width + 3.6, 1.1, 0.9), M.frame, V(g.x, gy + 6.4, g.z), -ang);
-    const tex = signTexture(g.label, g.sub, { bg: '#7a1f2b', accent: '#fbbf24' });
+
+    // Overhead classical granite entablature + triangular pediment for 정문
+    const beamH = isMain ? 1.45 : 1.1;
+    const beamY = isMain ? gy + 7.0 : gy + 6.4;
+    batch.add(new THREE.BoxGeometry(g.width + 4.4, beamH, 1.4), isMain ? gateCreamStone : M.frame, V(g.x, beamY, g.z), -ang);
+    if (isMain) {
+      // Classical triangular pediment atop the granite portal
+      const pedGeo = new THREE.ConeGeometry((g.width + 4.6) * 0.52, 2.6, 3);
+      pedGeo.scale(1, 1, 0.18);
+      batch.add(pedGeo, gateCreamStone, V(g.x, beamY + 2.0, g.z), -ang);
+      // Tall vertical cream-grey stone "광운대학교" monolith pillar to the left of the Main Gate
+      const mx = g.x - ux * (g.width / 2 + 4.0);
+      const mz = g.z - uz * (g.width / 2 + 4.0);
+      const my = getTerrainHeight(mx, mz);
+      batch.add(new THREE.BoxGeometry(1.1, 6.2, 0.7), gateCreamStone, V(mx, my + 3.1, mz), -ang);
+      extraCovers.push({ x: mx, z: mz, topY: my + 6.2, minX: mx - 0.7, maxX: mx + 0.7, minZ: mz - 0.7, maxZ: mz + 0.7 });
+    }
+
+    const tex = signTexture(
+      g.label,
+      g.sub,
+      isMain ? { bg: '#cfc9be', fg: '#1f2937', accent: '#7a1f2b' } : { bg: '#7a1f2b', accent: '#fbbf24' }
+    );
     for (const s of [1, -1]) {
-      const sign = signMesh(g.width + 2.6, 1.0, tex);
-      sign.position.set(g.x - uz * 0.47 * s, gy + 6.4, g.z + ux * 0.47 * s);
+      const sign = signMesh(g.width + 2.6, isMain ? 1.2 : 1.0, tex);
+      sign.position.set(g.x - uz * 0.74 * s, beamY, g.z + ux * 0.74 * s);
       sign.rotation.y = -ang + (s > 0 ? 0 : Math.PI);
       worldGroup.add(sign);
     }
-    // guard booth just inside the gate
+
+    // Security booth on the right side of the gate
     const bx = g.x + ux * (g.width / 2 + 3.6);
     const bz = g.z + uz * (g.width / 2 + 3.6);
     const by = getTerrainHeight(bx, bz);
-    batch.add(new THREE.BoxGeometry(2.6, 2.6, 2.6), M.booth, V(bx, by + 1.3, bz), -ang);
+    batch.add(new THREE.BoxGeometry(2.6, 2.6, 2.6), M.granite, V(bx, by + 1.3, bz), -ang);
     batch.add(new THREE.BoxGeometry(2.4, 0.9, 2.7), M.glass, V(bx, by + 1.7, bz), -ang);
     batch.add(new THREE.BoxGeometry(3.0, 0.25, 3.0), M.frame, V(bx, by + 2.75, bz), -ang);
     extraCovers.push({ x: bx, z: bz, topY: by + 2.6, minX: bx - 1.4, maxX: bx + 1.4, minZ: bz - 1.4, maxZ: bz + 1.4 });
@@ -328,7 +409,8 @@ export function buildCampusFeatures(worldGroup, batch, buildings, outlines) {
     }
     if (!best || best.dist > 8) continue;
     const { mx, mz, nx, nz, ang } = projectOnEdge(best, ex, ez);
-    const gy = getTerrainHeight(mx + nx * 2, mz + nz * 2);
+    // Align entrance cleanly with the building's graded pad level (never buried in slopes)
+    const gy = Math.max(best.b.baseY, getTerrainHeight(mx + nx * 1.5, mz + nz * 1.5));
     // glass doors on the facade
     batch.add(new THREE.BoxGeometry(4.2, 3.0, 0.25), M.glass, V(mx + nx * 0.15, gy + 1.5, mz + nz * 0.15), -ang);
     batch.add(new THREE.BoxGeometry(0.12, 3.0, 0.3), M.frame, V(mx + nx * 0.17, gy + 1.5, mz + nz * 0.17), -ang);

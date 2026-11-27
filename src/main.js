@@ -23,6 +23,8 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.06;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#1d2f4a');
@@ -33,11 +35,13 @@ const ORBIT_DEFAULT_POS = new THREE.Vector3(-260, 210, 260);
 camera.position.copy(ORBIT_DEFAULT_POS);
 scene.add(camera);
 
-const hemiLight = new THREE.HemisphereLight('#c4dcff', '#4b5a6e', 1.0);
+const hemiLight = new THREE.HemisphereLight('#cfe3ff', '#4b5a6e', 1.15);
 scene.add(hemiLight);
-const dirLight = new THREE.DirectionalLight('#e3eeff', 1.25);
+const dirLight = new THREE.DirectionalLight('#eef4ff', 1.45);
 dirLight.castShadow = true;
 dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.bias = -0.0004;
+dirLight.shadow.normalBias = 0.05;
 dirLight.shadow.camera.near = 10;
 dirLight.shadow.camera.far = 420;
 const SHADOW_HALF = 110;
