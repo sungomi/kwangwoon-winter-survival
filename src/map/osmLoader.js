@@ -26,24 +26,32 @@ const KWANGWOON_PROFILES = {
   '인터내셔널 하우스': { facadeType: 'brick_clean', wallColor: '#a85a4a', roofColor: '#b5b9be', plinthColor: '#84888d', height: 14 },
 };
 
-function estimateHeight(tags = {}, profile = null) {
+function estimateHeight(tags = {}, profile = null, area = 200, idx = 0) {
   if (tags.height) {
     const parsed = parseFloat(tags.height);
     if (!Number.isNaN(parsed) && parsed > 2) return parsed;
   }
   if (tags['building:levels']) {
     const levels = parseFloat(tags['building:levels']);
-    if (!Number.isNaN(levels) && levels > 0) return levels * 3.5;
+    if (!Number.isNaN(levels) && levels > 0) return levels * 3.4;
   }
   if (profile?.height) return profile.height;
   if (tags.building === 'university' || tags.amenity === 'university') return 20;
   if (tags.building === 'dormitory') return 16;
-  if (tags.building === 'apartments') return 36;
-  return 11;
+  if (tags.building === 'apartments') return 32 + (idx % 3) * 4;
+  if (tags.building === 'commercial' || tags.building === 'retail') return 13 + (idx % 3) * 3.2;
+  if (tags.building === 'train_station') return 11;
+  if (tags.building === 'school') return 15;
+  if (tags.building === 'house') return 7.5 + (idx % 3) * 1.8;
+  // Korean multi-family villas (다세대/연립주택): 3~5 stories based on footprint area
+  if (area < 140) return 9.5 + (idx % 3) * 1.8;
+  if (area < 300) return 12.0 + (idx % 3) * 2.2;
+  return 15.0 + (idx % 3) * 2.5;
 }
 
-const ROOF_PALETTE = ['#cfd4da', '#4a855e', '#4c80a6', '#a85143', '#b8bec4'];
-const WALL_PALETTE = ['#dcd5c9', '#d2cabd', '#c7bfb2', '#e0d9ce', '#b56e5c'];
+// Authentic Korean residential roof & wall palettes (월계동 주택가: 녹색 우레탄 방수 옥상, 적벽돌/베이지 빌라, 아파트)
+const ROOF_PALETTE = ['#4e8a64', '#528c68', '#c8cdd3', '#8c5347', '#6c757d', '#4c80a6'];
+const WALL_PALETTE = ['#dfd5c6', '#a35142', '#d6cfc2', '#e4ddd2', '#944a3d', '#cfc9be', '#d8d2c8'];
 
 function computeGeoJsonOrigin(features) {
   let sumLat = 0;
@@ -118,23 +126,33 @@ function loadGeoJson(geojson) {
       if (!facadeType) {
         if (props.building === 'apartments') facadeType = 'apartment';
         else if (props.building === 'school') facadeType = 'brick';
-        else facadeType = bIdx % 3 === 0 ? 'brick' : bIdx % 3 === 1 ? 'ribbon' : 'stone_modern';
+        else if (props.building === 'commercial' || props.building === 'retail') facadeType = bIdx % 2 === 0 ? 'stone_modern' : 'curtainwall';
+        else if (props.building === 'house' || props.building === 'residential') facadeType = bIdx % 3 === 0 ? 'brick' : 'villa';
+        else facadeType = bIdx % 3 === 0 ? 'brick' : bIdx % 3 === 1 ? 'villa' : 'stone_modern';
       }
 
       const wallColor = profile?.wallColor || WALL_PALETTE[bIdx % WALL_PALETTE.length];
-      const roofColor = profile?.roofColor || (isCampus ? '#c8cdd2' : ROOF_PALETTE[bIdx % ROOF_PALETTE.length]);
+      const roofColor =
+        profile?.roofColor ||
+        (isCampus
+          ? '#c8cdd2'
+          : props.building === 'apartments'
+          ? '#c6ccd2'
+          : ROOF_PALETTE[bIdx % ROOF_PALETTE.length]);
 
       for (const ring of rings) {
         if (!ring || ring.length < 3) continue;
         const pts = ring.map(project);
         const { area, minWidth } = measureFootprint(pts);
-        // OSM artifacts: unnamed slivers / sheds squeezed against real buildings are not on the real map
-        if (!rawName && (area < 90 || minWidth < 5.5)) {
+        // Keep real small Wolgye-dong residential houses while still removing tiny OSM slivers
+        const minArea = props.building === 'house' || props.building === 'residential' || props.building === 'yes' ? 42 : 75;
+        const minW = props.building === 'house' || props.building === 'residential' || props.building === 'yes' ? 4.2 : 5.2;
+        if (!rawName && (area < minArea || minWidth < minW)) {
           removed.push({ id: f.id || props['@id'] || bIdx, area: Math.round(area), minWidth: +minWidth.toFixed(1) });
           bIdx++;
           continue;
         }
-        let height = estimateHeight(props, profile);
+        let height = estimateHeight(props, profile, area, bIdx);
         // Mis-mapped narrow footprints would otherwise render as needle towers
         if (minWidth < 12) height = Math.min(height, Math.max(7, minWidth * 1.6));
         buildings.push({
@@ -146,7 +164,7 @@ function loadGeoJson(geojson) {
           height,
           roofColor,
           wallColor,
-          plinthColor: profile?.plinthColor || '#84888e',
+          plinthColor: profile?.plinthColor || (isCampus ? '#84888e' : '#7b7f85'),
           polygon: pts,
         });
         bIdx++;

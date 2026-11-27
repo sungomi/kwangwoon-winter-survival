@@ -286,6 +286,29 @@ export function createBuildingFacadeTexture(facadeType = 'ribbon', wallColor = '
     ctx.fillStyle = '#38556e';
     ctx.fillRect(0, 40, W, 44);
     ctx.fillRect(0, 168, W, 44);
+  } else if (facadeType === 'villa') {
+    // Korean 다세대/연립주택 (Wolgye-dong villa): warm stone/brick tile cladding, double-pane residential windows & balcony ledges
+    ctx.fillStyle = wallColor || '#dfd5c6';
+    ctx.fillRect(0, 0, W, H);
+    drawStoneJoints(ctx, W, H, 32, 16, 0.07);
+    for (let r = 0; r < 4; r++) {
+      const y = r * 64;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.09)';
+      ctx.fillRect(0, y, W, 4);
+      for (let c = 0; c < 3; c++) {
+        const x = c * 84 + 14;
+        const wy = y + 14;
+        ctx.fillStyle = '#3c4650';
+        ctx.fillRect(x - 2, wy - 2, 60, 38);
+        drawLitWindow(ctx, x, wy, 56, 34, r * 11 + c * 13 + 1, '#253444');
+        // white PVC residential window sash (한국 빌라 이중창)
+        ctx.fillStyle = '#ece8e0';
+        ctx.fillRect(x + 26, wy, 4, 34);
+        // subtle metal railing / sill bar
+        ctx.fillStyle = '#707882';
+        ctx.fillRect(x - 2, wy + 34, 60, 4);
+      }
+    }
   } else if (facadeType === 'apartment') {
     ctx.fillStyle = wallColor || '#e3dfd7';
     ctx.fillRect(0, 0, W, H);

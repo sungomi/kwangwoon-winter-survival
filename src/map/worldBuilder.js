@@ -620,6 +620,8 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
   // Buildings (graded pad + visible stone foundation plinth + Roadview-accurate above-ground body)
   labelsLayer.innerHTML = '';
   const facadeCache = new Map();
+  const wallMatCache = new Map();
+  const roofMatCache = new Map();
   const plinthMatCache = new Map();
   const buildings = [];
 
@@ -657,21 +659,31 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
       facadeCache.set(texKey, createBuildingFacadeTexture(b.facadeType || 'ribbon', b.wallColor));
     }
 
-    // Preserve real-world roof colors (Roadview/Skyview) with subtle winter frost tint
-    const baseRoofCol = new THREE.Color(b.roofColor || '#c8cdd2');
-    if (b.roofStyle !== 'hwado_pediment' && b.roofStyle !== 'memorial_80' && b.roofStyle !== 'rooftop_turf') {
-      baseRoofCol.lerp(new THREE.Color('#eef4fa'), 0.35);
+    // Preserve real-world roof colors (Roadview/Skyview + Korean residential waterproof roofs) with subtle winter frost tint
+    const roofKey = `${b.roofStyle || ''}_${b.roofColor || '#c8cdd2'}`;
+    if (!roofMatCache.has(roofKey)) {
+      const baseRoofCol = new THREE.Color(b.roofColor || '#c8cdd2');
+      if (b.roofStyle !== 'hwado_pediment' && b.roofStyle !== 'memorial_80' && b.roofStyle !== 'rooftop_turf') {
+        baseRoofCol.lerp(new THREE.Color('#eef4fa'), 0.28);
+      }
+      roofMatCache.set(roofKey, new THREE.MeshStandardMaterial({ color: baseRoofCol, roughness: 0.88, metalness: 0.04 }));
     }
-    const roofMat = new THREE.MeshStandardMaterial({ color: baseRoofCol, roughness: 0.88, metalness: 0.04 });
-    const wallMat = new THREE.MeshStandardMaterial({
-      map: facadeCache.get(texKey),
-      roughness: b.facadeType === 'curtainwall' || b.facadeType === 'saebit_modern' || b.facadeType === 'memorial_80' ? 0.52 : 0.84,
-      metalness: b.facadeType === 'curtainwall' || b.facadeType === 'saebit_modern' ? 0.16 : 0.04,
-    });
+    if (!wallMatCache.has(texKey)) {
+      wallMatCache.set(
+        texKey,
+        new THREE.MeshStandardMaterial({
+          map: facadeCache.get(texKey),
+          roughness: b.facadeType === 'curtainwall' || b.facadeType === 'saebit_modern' || b.facadeType === 'memorial_80' ? 0.52 : 0.84,
+          metalness: b.facadeType === 'curtainwall' || b.facadeType === 'saebit_modern' ? 0.16 : 0.04,
+        })
+      );
+    }
+    const roofMat = roofMatCache.get(roofKey);
+    const wallMat = wallMatCache.get(texKey);
 
     const mesh = new THREE.Mesh(geo, [roofMat, wallMat]);
     mesh.position.y = bodyBaseY;
-    mesh.castShadow = true;
+    mesh.castShadow = b.isCampus || bodyHeight >= 16;
     mesh.receiveShadow = true;
 
     // 2) Foundation plinth / retaining base (기단부) extending solidly below downhill terrain
@@ -686,13 +698,15 @@ export function buildCampusWorld(scene, mapData, labelsLayer) {
     plinthGeo.rotateX(-Math.PI / 2);
     const plinthMesh = new THREE.Mesh(plinthGeo, plinthMatCache.get(plinthColor));
     plinthMesh.position.y = -plinthHeight + 0.06;
-    plinthMesh.castShadow = true;
+    plinthMesh.castShadow = b.isCampus;
     plinthMesh.receiveShadow = true;
     mesh.add(plinthMesh);
 
-    const edgesGeo = new THREE.EdgesGeometry(geo, 24);
-    const edges = new THREE.LineSegments(edgesGeo, edgeMat);
-    mesh.add(edges);
+    if (b.isCampus || bodyHeight >= 22) {
+      const edgesGeo = new THREE.EdgesGeometry(geo, 24);
+      const edges = new THREE.LineSegments(edgesGeo, edgeMat);
+      mesh.add(edges);
+    }
 
     // Add realistic Roadview/Skyview rooftop details strictly anchored INSIDE the polygon (never overhanging!)
     const anchor = findInteriorRoofAnchor(b.polygon, bounds);
